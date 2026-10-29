@@ -6,6 +6,11 @@
   "publisher": "zelix",
   "icon": "images/zelix-icon.png",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/speedmantransformer-web/Zelix-Language.git",
+    "directory": "vscode-zelix"
+  },
   "keywords": [
     "zelix",
     "language",
