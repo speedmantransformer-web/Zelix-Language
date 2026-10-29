@@ -1,0 +1,4 @@
+# Library packages provide functions only; they do not execute statements.
+function points_for taking round and points_per_round
+    return round times points_per_round
+end function

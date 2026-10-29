@@ -1,0 +1,10 @@
+{
+  "iconDefinitions": {
+    "_zelix": {
+      "iconPath": "../images/zelix-file-icon.svg"
+    }
+  },
+  "fileExtensions": {
+    "zelix": "_zelix"
+  }
+}

@@ -1,0 +1,7 @@
+function add taking first and second
+    return first plus second
+end function
+
+create answer as add with 10 and 20
+display answer
+call add with 4 and 6

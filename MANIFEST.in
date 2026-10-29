@@ -1,0 +1,7 @@
+include README.md CHANGELOG.md LICENSE
+recursive-include docs *.md
+recursive-include examples *.zelix
+recursive-include examples *.toml
+recursive-include benchmarks *.py *.c *.zelix
+recursive-include vscode-zelix *
+recursive-exclude * __pycache__ *.py[cod]

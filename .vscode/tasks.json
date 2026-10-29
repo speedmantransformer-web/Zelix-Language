@@ -1,0 +1,61 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Zelix: Run current file",
+      "type": "process",
+      "command": "${config:zelix.pythonPath}",
+      "args": [
+        "${workspaceFolder}/zelix.py",
+        "${file}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Zelix: Compile current file",
+      "type": "process",
+      "command": "${config:zelix.pythonPath}",
+      "args": [
+        "${workspaceFolder}/zelix.py",
+        "--compile",
+        "${file}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Zelix: Show optimized IR",
+      "type": "process",
+      "command": "${config:zelix.pythonPath}",
+      "args": [
+        "${workspaceFolder}/zelix.py",
+        "--emit-ir",
+        "${file}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Zelix: Build for debugging",
+      "type": "process",
+      "command": "${config:zelix.pythonPath}",
+      "args": [
+        "${workspaceFolder}/zelix.py",
+        "--compile",
+        "--debug",
+        "${file}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

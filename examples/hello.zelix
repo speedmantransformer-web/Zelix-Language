@@ -1,0 +1,4 @@
+display text Hello from Zelix
+create score as 10
+score becomes score plus 5
+display score

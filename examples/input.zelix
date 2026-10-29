@@ -1,0 +1,4 @@
+display text What is your name
+create username as input text
+display text Hello
+display username

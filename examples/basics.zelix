@@ -1,0 +1,11 @@
+create score as 95
+create player as text Alex end text
+display text Welcome to Zelix
+display player
+display score
+
+if score is greater than or equal to 90
+    display text Excellent
+otherwise
+    display text Keep practicing
+end if

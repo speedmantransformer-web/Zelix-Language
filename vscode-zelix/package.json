@@ -1,0 +1,108 @@
+{
+  "name": "zelix-language",
+  "displayName": "Zelix Language",
+  "description": "Language support and project workflow for Zelix: completions, diagnostics, formatting, navigation, native builds, and local packages.",
+  "version": "0.2.0",
+  "publisher": "zelix",
+  "icon": "images/zelix-icon.png",
+  "license": "MIT",
+  "keywords": [
+    "zelix",
+    "language",
+    "compiler",
+    "interpreter",
+    "raylib"
+  ],
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:zelix"
+  ],
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "zelix",
+        "aliases": [
+          "Zelix",
+          "zelix"
+        ],
+        "extensions": [
+          ".zelix"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "zelix",
+        "scopeName": "source.zelix",
+        "path": "./syntaxes/zelix.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "zelix",
+        "path": "./snippets/zelix.json"
+      }
+    ],
+    "iconThemes": [
+      {
+        "id": "zelix-file-icons",
+        "label": "Zelix File Icons",
+        "path": "./icons/zelix-icon-theme.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "zelix.runCurrentFile",
+        "title": "Zelix: Run Current File",
+        "category": "Zelix"
+      },
+      {
+        "command": "zelix.compileCurrentFile",
+        "title": "Zelix: Compile Current File",
+        "category": "Zelix"
+      },
+      {
+        "command": "zelix.showOptimizedIR",
+        "title": "Zelix: Show Optimized IR",
+        "category": "Zelix"
+      },
+      {
+        "command": "zelix.initProject",
+        "title": "Zelix: Initialize Project",
+        "category": "Zelix"
+      },
+      {
+        "command": "zelix.installPackages",
+        "title": "Zelix: Install Local Packages",
+        "category": "Zelix"
+      }
+    ],
+    "configuration": {
+      "title": "Zelix",
+      "properties": {
+        "zelix.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Python executable used when running Zelix from a source checkout or custom CLI script."
+        },
+        "zelix.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to zelix.py; when empty, uses a nearby source checkout or the installed Zelix CLI."
+        },
+        "zelix.command": {
+          "type": "string",
+          "default": "zelix",
+          "description": "Zelix CLI executable used when no source checkout or custom CLI script is configured."
+        }
+      }
+    }
+  }
+}

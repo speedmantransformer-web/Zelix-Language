@@ -1,0 +1,36 @@
+# Build with: python zelix.py --compile examples/game_2d.zelix
+call init_window with 800 and 450 and text Zelix 2D Demo end text
+call set_target_fps with 60
+
+create scene as create_scene
+create player as create_object with 40 and 40 and 42 and 42 and text orange end text
+call add_object with scene and player
+call activate_scene with scene
+
+create body as create_body with 40 and 40 and 42 and 42 and 1
+call physics_set_gravity with 600
+
+# To play an audio asset, initialize the audio device and load it once:
+# call init_audio
+# create click_sound as load_sound with text assets/click.wav end text
+
+while not window_should_close
+    if key_down with text right end text
+        call body_set_velocity with body and 180 and 0
+    otherwise
+        call body_set_velocity with body and 0 and 0
+    end if
+    # Optional: call play_sound with click_sound when an event occurs.
+
+    call physics_update with frame_time
+    call set_object_position with player and body_x with body and body_y with body
+
+    call begin_drawing
+    call clear_background with text raywhite end text
+    call draw_scene
+    call draw_text with text Move with the right arrow end text and 20 and 20 and 20 and text darkgray end text
+    call end_drawing
+end loop
+
+call close_window
+# call close_audio when the optional audio example is enabled.

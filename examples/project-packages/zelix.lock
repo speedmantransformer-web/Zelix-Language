@@ -1,0 +1,14 @@
+{
+  "dependencies": {
+    "score-tools": {
+      "path": "../score-tools",
+      "sha256": "dd7dee32484fee6cc0fdca0ee23c913153d6d197fafc13a84819ee75f331ca08",
+      "version": "1.0.0"
+    }
+  },
+  "lock_version": 1,
+  "package": {
+    "name": "game-score",
+    "version": "0.1.0"
+  }
+}

@@ -1,0 +1,30 @@
+# A small UDP message demo for two local or networked peers.
+# Start two copies with different listen ports; enter the other peer's address and port.
+# Build with: python zelix.py --compile examples/game_multiplayer.zelix
+call init_window with 700 and 420 and text Zelix Multiplayer Demo end text
+create listen_port as input number
+create remote_address as input text
+create remote_port as input number
+create connection as network_start with listen_port
+create received as text Waiting for UDP messages end text
+create packet as ""
+
+while not window_should_close
+    if key_pressed with text space end text
+        call network_send with connection and remote_address and remote_port and text Hello from Zelix end text
+    end if
+
+    packet becomes network_receive with connection
+    if packet is not ""
+        received becomes packet
+    end if
+
+    call begin_drawing
+    call clear_background with text raywhite end text
+    call draw_text with text Press space to send a UDP message end text and 20 and 20 and 20 and text darkgray end text
+    call draw_text with received and 20 and 70 and 20 and text blue end text
+    call end_drawing
+end loop
+
+call network_close with connection
+call close_window

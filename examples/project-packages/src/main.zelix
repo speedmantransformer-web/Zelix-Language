@@ -1,0 +1,20 @@
+# Import the functions declared by score-tools/src/main.zelix.
+use score-tools
+
+create total as 0
+create round_score as 0
+
+# Add the score from each of five rounds.
+repeat with round from 1 to 5
+    round_score becomes points_for with round and 10
+    total becomes total plus round_score
+end loop
+
+display text Five-round score: end text
+display total
+
+if total is greater than or equal to 150
+    display text You reached the target! end text
+otherwise
+    display text Play another round to reach the target. end text
+end if

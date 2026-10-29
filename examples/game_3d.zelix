@@ -1,0 +1,16 @@
+# Build with: python zelix.py --compile examples/game_3d.zelix
+call init_window with 800 and 600 and text Zelix 3D Demo end text
+call set_target_fps with 60
+
+while not window_should_close
+    call begin_drawing
+    call clear_background with text raywhite end text
+    call begin_3d
+    call draw_cube with 0 and 0 and 0 and 2 and text blue end text
+    call draw_sphere with 3 and 0 and 0 and 1 and text orange end text
+    call end_3d
+    call draw_text with text Zelix 3D end text and 20 and 20 and 20 and text darkgray end text
+    call end_drawing
+end loop
+
+call close_window

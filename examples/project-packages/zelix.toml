@@ -1,0 +1,7 @@
+[package]
+name = "game-score"
+version = "0.1.0"
+entry = "src/main.zelix"
+
+[dependencies]
+score-tools = { path = "../score-tools" }

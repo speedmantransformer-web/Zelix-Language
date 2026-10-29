@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify tag matches package version
+        run: |
+          VERSION="$(python -c 'from zelix import VERSION; print(VERSION)')"
+          test "${GITHUB_REF_NAME}" = "v${VERSION}"
+          grep -Eq "^## ${VERSION} - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md
+          if [[ "${VERSION%%.*}" == "0" ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+        id: release_type
+      - run: python -m unittest discover -s tests -v
+      - run: python zelix.py --check examples/functions.zelix
+      - run: python -m pip install .
+      - run: zelix --version
+      - run: python -m pip install build
+      - run: python -m build
+      - uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ steps.release_type.outputs.prerelease }}
+          files: |
+            dist/*

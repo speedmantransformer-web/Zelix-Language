@@ -1,0 +1,154 @@
+{
+  "Zelix variable": {
+    "prefix": "create",
+    "body": [
+      "create ${1:name} as ${2:10}"
+    ],
+    "description": "Create a variable"
+  },
+  "Zelix if": {
+    "prefix": "if",
+    "body": [
+      "if ${1:score} is greater than ${2:10}",
+      "\t$0",
+      "otherwise",
+      "\t",
+      "end if"
+    ],
+    "description": "If/otherwise block"
+  },
+  "Zelix repeat loop": {
+    "prefix": "repeat",
+    "body": [
+      "repeat ${1:10} times",
+      "\t$0",
+      "end loop"
+    ],
+    "description": "Repeat loop"
+  },
+  "Zelix while loop": {
+    "prefix": "while",
+    "body": [
+      "while ${1:counter} is less than ${2:10}",
+      "\t$0",
+      "end loop"
+    ],
+    "description": "While loop"
+  },
+  "Zelix function": {
+    "prefix": "function",
+    "body": [
+      "function ${1:name} taking ${2:first} and ${3:second}",
+      "\t$0",
+      "end function"
+    ],
+    "description": "Function declaration"
+  },
+  "Zelix text": {
+    "prefix": "text",
+    "body": [
+      "text ${1:Hello world} end text"
+    ],
+    "description": "Text literal"
+  },
+  "Zelix input": {
+    "prefix": "input",
+    "body": [
+      "create ${1:name} as input ${2|text,number|}"
+    ],
+    "description": "Read text or a number from the user"
+  },
+  "Zelix function call": {
+    "prefix": "call",
+    "body": [
+      "call ${1:function} with ${2:argument}"
+    ],
+    "description": "Call a Zelix function"
+  },
+  "Zelix counted loop": {
+    "prefix": "counted",
+    "body": [
+      "repeat with ${1:index} from ${2:1} to ${3:10}",
+      "\t$0",
+      "end loop"
+    ],
+    "description": "Counted loop"
+  },
+  "Zelix local package import": {
+    "prefix": "use",
+    "body": [
+      "use ${1:package-name}"
+    ],
+    "description": "Import functions from a declared local path dependency"
+  },
+  "Zelix score function": {
+    "prefix": "scorefn",
+    "body": [
+      "function ${1:points_for} taking ${2:round} and ${3:points_per_round}",
+      "\treturn ${2:round} times ${3:points_per_round}",
+      "end function"
+    ],
+    "description": "Define a reusable function for a local package"
+  },
+  "Zelix program": {
+    "prefix": "zelix",
+    "body": [
+      "display text Hello from Zelix",
+      "create ${1:score} as ${2:10}",
+      "display ${1:score}"
+    ],
+    "description": "Small runnable Zelix program"
+  },
+  "Zelix 2D game loop": {
+    "prefix": "game2d",
+    "body": [
+      "call init_window with ${1:800} and ${2:450} and text ${3:My Game} end text",
+      "call set_target_fps with 60",
+      "",
+      "while not window_should_close",
+      "\tcall begin_drawing",
+      "\tcall clear_background with text raywhite end text",
+      "\t$0",
+      "\tcall end_drawing",
+      "end loop",
+      "",
+      "call close_window"
+    ],
+    "description": "Create a Raylib window and frame loop"
+  },
+  "Zelix 3D drawing": {
+    "prefix": "draw3d",
+    "body": [
+      "call begin_3d",
+      "call draw_cube with ${1:0} and ${2:0} and ${3:0} and ${4:2} and text ${5:blue} end text",
+      "call end_3d"
+    ],
+    "description": "Draw a cube with the built-in perspective camera"
+  },
+  "Zelix game object scene": {
+    "prefix": "scene",
+    "body": [
+      "create ${1:scene} as create_scene",
+      "create ${2:player} as create_object with ${3:40} and ${4:40} and ${5:40} and ${6:40} and text ${7:orange} end text",
+      "call add_object with ${1:scene} and ${2:player}",
+      "call activate_scene with ${1:scene}"
+    ],
+    "description": "Create a scene and add a rectangle game object"
+  },
+  "Zelix physics body": {
+    "prefix": "body",
+    "body": [
+      "create ${1:body} as create_body with ${2:40} and ${3:40} and ${4:40} and ${5:40} and ${6:1}",
+      "call physics_set_gravity with ${7:600}",
+      "call physics_update with frame_time"
+    ],
+    "description": "Create an AABB physics body and advance the simulation"
+  },
+  "Zelix UDP send": {
+    "prefix": "udpsend",
+    "body": [
+      "call network_send with ${1:socket} and ${2:address} and ${3:port} and text ${4:message} end text"
+    ],
+    "description": "Send a UDP message to an IPv4 peer"
+  }
+}

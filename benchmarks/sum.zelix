@@ -1,0 +1,5 @@
+create total as 0
+repeat with number from 1 to __LIMIT__
+    total becomes total plus number
+end loop
+display total

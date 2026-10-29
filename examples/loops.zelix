@@ -1,0 +1,9 @@
+repeat 3 times
+    display text Zelix is running
+end loop
+
+create counter as 1
+while counter is less than or equal to 5
+    display counter
+    counter becomes counter plus 1
+end loop
