@@ -1,6 +1,6 @@
 # Zelix Programming Language
 
-**Zelix 0.3.1 (alpha)** is a keyword-driven programming language with an interpreter, an optimizing native compiler for Windows and Linux, static types, generic collections, async concurrency, Raylib game APIs, local path-based packages, and VS Code tooling. Zelix has not declared a stable 1.0 release.
+**Zelix 0.3.2 (alpha)** is a keyword-driven programming language with an interpreter, an optimizing native compiler for Windows and Linux, static types, generic collections, async concurrency, Raylib game APIs, local path-based packages, and VS Code tooling. Zelix has not declared a stable 1.0 release.
 
 The interpreter remains available for quick iteration. Native compilation lowers Zelix programs into an intermediate representation (IR), folds constant expressions and branches, then emits C for a platform-native compiler. VS Code support includes completion, validation diagnostics, formatting, go-to-definition, run/build commands, and an interpreter-backed source debugger with breakpoints, stepping, stack frames, local variables, and program output. Interactive `input` statements are not supported in a debugger session.
 
@@ -73,13 +73,14 @@ Hello from Zelix
 - Conditions: `if score is greater than 10` ... `otherwise` ... `end if`
 - Loops: `repeat 3 times` ... `end loop`
 - While: `while score is less than 20` ... `end loop`
+- Input expressions: declare input with `create name as input text`, then assign later with `name becomes input text` (use `number` for numeric input)
 - Functions: see `examples/functions.zelix`
 - Math words: `plus`, `minus`, `times`, `divided by`, `remainder`
 - Comparisons: `is`, `is not`, `is greater than`, `is less than`, `is greater than or equal to`, `is less than or equal to`
 - Logic: `and`, `or`, `not`
 - Boolean values: `true`, `false`
 - Type annotations: `create score as number with 3`
-- Generic collection types: `list<number>`, `map<text, number>`, `set<number>`, `tuple<number, text>`
+- Generic collection types: `list<number>`, `map<text, number>`, `set<number>`, `set<list<text>>`, `tuple<number, text>`
 - Concurrency: `async function`, `await`, `spawn`, `spawn_thread`, and typed channels
 
 Statements are line-based and blocks end with explicit keywords. Periods at the end of statements are optional. Commas are available for separating values, but are not required for ordinary statements.
@@ -128,7 +129,7 @@ create scores as list<number> with list with 7 and 12
 display first with scores
 ```
 
-Collection constructors and operations include `list`, `map`, `set`, `tuple`, `empty_list`, `empty_map`, `empty_set`, `append`, `insert`, `add_to_set`, `put`, `get`, `remove`, `contains`, `length`, `keys`, and `values`. Lists and tuples use zero-based indexes; invalid indexes and invalid map/set operations produce Zelix errors. Map keys and set elements must be hashable: primitive values and tuples of hashable values.
+Collection constructors and operations include `list`, `map`, `set`, `tuple`, `empty_list`, `empty_map`, `empty_set`, `append`, `insert`, `add_to_set`, `put`, `get`, `remove`, `contains`, `length`, `keys`, and `values`. Lists and tuples use zero-based indexes; invalid indexes and invalid map/set operations produce Zelix errors. Map keys and most set elements must be hashable; sets also accept `list<text>` elements, comparing string arrays by their contents.
 
 Use async functions and channels for tasks. `sleep` yields for a duration in seconds; channel capacity `0` is unbounded:
 
@@ -153,7 +154,7 @@ Run `zelix examples/concurrency_and_collections.zelix` for an end-to-end example
 
 ## VS Code integration
 
-The `vscode-zelix` 0.4.1 extension provides syntax highlighting, keyword/variable/function/game/collection/concurrency completions, compiler-backed error highlighting, document formatting, go-to-definition for functions, parameters, variables, and counted-loop variables, plus interpreter-backed debugging. Commands include **Zelix: Run Current File**, **Zelix: Debug Current File**, **Zelix: Compile Current File**, **Zelix: Show Optimized IR**, **Zelix: Initialize Project**, and **Zelix: Install Local Packages**, plus a status-bar Run button. Install the Zelix 0.3.1 CLI separately for execution, validation, and source debugging.
+The `vscode-zelix` 0.4.2 extension provides syntax highlighting, keyword/variable/function/game/collection/concurrency completions, compiler-backed error highlighting, document formatting, go-to-definition for functions, parameters, variables, and counted-loop variables, plus interpreter-backed debugging. Commands include **Zelix: Run Current File**, **Zelix: Debug Current File**, **Zelix: Compile Current File**, **Zelix: Show Optimized IR**, **Zelix: Initialize Project**, and **Zelix: Install Local Packages**, plus a status-bar Run button. Install the Zelix 0.3.2 CLI separately for execution, validation, and source debugging.
 
 The workspace includes run/build/IR tasks and native debug configurations. VS Code recommends the Zelix extension and the Microsoft C/C++ extension; the latter is needed to debug native builds.
 
@@ -164,7 +165,7 @@ The workspace includes run/build/IR tasks and native debug configurations. VS Co
    - **Windows:** `%USERPROFILE%\\.vscode\\extensions`
    - **macOS/Linux:** `~/.vscode/extensions`
 3. Copy the entire `vscode-zelix` folder into that extensions folder.
-4. Rename the copied folder to `zelix-language-0.4.1` if desired.
+4. Rename the copied folder to `zelix-language-0.4.2` if desired.
 5. Reopen VS Code.
 6. Open a `.zelix` file. The language mode should show **Zelix** in the status bar.
 7. If the language CLI is not beside the installed extension, set `zelix.cliPath` to the full path of `zelix.py`. Set `zelix.pythonPath` if the Python command on your system is not `python`.
@@ -302,6 +303,10 @@ Call `init_audio` before `load_sound`. Sound files are loaded relative to the `.
 `network_start` opens a non-blocking IPv4 UDP socket on a local port. `network_send` sends a text datagram to an IPv4 address and port; `network_receive` returns the next message or empty text if none is available; `network_close` closes the socket. UDP is connectionless and does not guarantee delivery or ordering, so applications should add acknowledgement/retry logic if their game requires it.
 
 See [examples/game_2d.zelix](./examples/game_2d.zelix), [examples/game_sprites.zelix](./examples/game_sprites.zelix), [examples/game_3d.zelix](./examples/game_3d.zelix), and [examples/game_multiplayer.zelix](./examples/game_multiplayer.zelix). The VS Code extension includes `game2d`, `draw3d`, `scene`, and `body` snippets.
+
+## Minecraft Java mod scripts (experimental)
+
+The experimental [Minecraft Zelix loader](./examples/minecraft-zelix-loader) pairs a Java LaunchWrapper adapter with Zelix `.zelix` mod scripts for Minecraft Java 1.8.8 and 1.12.2. It requires an existing LaunchWrapper-based game profile and a separately installed Zelix CLI. It is an event bridge, not a Forge/Fabric replacement: it does not load Java mod JARs or currently expose Minecraft world, rendering, or input APIs. Only install mod scripts you trust.
 
 ## Remaining roadmap
 

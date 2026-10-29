@@ -24,7 +24,7 @@
     },
     {
       "name": "storage.type.zelix",
-      "match": "\\b(create|number|text|boolean|void|list|map|set|tuple|channel|task|as|becomes|taking|returning)\\b"
+      "match": "\\b(create|number|text|string|boolean|void|list|map|set|tuple|channel|task|as|becomes|taking|returning)\\b"
     },
     {
       "name": "keyword.operator.word.zelix",

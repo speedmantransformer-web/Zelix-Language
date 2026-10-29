@@ -1,0 +1,47 @@
+plugins {
+    id 'java'
+}
+
+group = 'dev.zelix.minecraft'
+version = '0.1.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+repositories {
+    mavenCentral()
+    maven {
+        url = uri('https://libraries.minecraft.net/')
+    }
+}
+
+dependencies {
+    compileOnly 'net.minecraft:launchwrapper:1.12'
+    compileOnly 'org.ow2.asm:asm-all:5.0.3'
+    testRuntimeOnly 'net.minecraft:launchwrapper:1.12'
+    testRuntimeOnly 'org.ow2.asm:asm-all:5.0.3'
+    testImplementation 'junit:junit:4.13.2'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+jar {
+    archiveBaseName = 'zelix-minecraft-loader'
+    manifest {
+        attributes(
+            'Implementation-Title': 'Zelix Minecraft Script Loader',
+            'Implementation-Version': project.version,
+            'TweakClass': 'dev.zelix.minecraft.ZelixTweaker'
+        )
+    }
+}
+
+test {
+    systemProperty 'zelix.repositoryRoot', rootProject.projectDir.parentFile.parentFile.absolutePath
+    systemProperty 'zelix.pythonCommand',
+            System.getProperty('zelix.pythonCommand', 'python')
+}

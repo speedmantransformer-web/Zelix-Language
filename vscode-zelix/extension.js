@@ -12,7 +12,7 @@ const KEYWORDS = [
   "less than or equal to", "equals", "is not", "plus", "minus", "times",
   "divided by", "remainder",
   "async", "await", "spawn", "number", "boolean", "void", "list", "map",
-  "set", "tuple", "channel", "task", "returning",
+  "string", "set", "tuple", "channel", "task", "returning",
 ];
 const COLLECTION_FUNCTIONS = [
   "list", "map", "set", "tuple", "empty_list", "empty_map", "empty_set",

@@ -93,6 +93,14 @@ def _hashable(value: Type) -> bool:
     return value.name == "tuple" and all(_hashable(item) for item in value.arguments)
 
 
+def _valid_set_element(value: Type) -> bool:
+    return _hashable(value) or (
+        value.name == "list"
+        and len(value.arguments) == 1
+        and value.arguments[0].name == "text"
+    )
+
+
 def _merge(left: Type, right: Type) -> Type:
     return left if left == right else Type("any")
 
@@ -266,8 +274,8 @@ class TypeChecker:
         if name in {"list", "set", "empty_list", "empty_set"}:
             collection_name = name.removeprefix("empty_")
             element = args[0] if args else (expected.arguments[0] if expected and expected.arguments else Type("any"))
-            if collection_name == "set" and not _hashable(element):
-                self._error(call.line, f"Set elements must be hashable, got {element}")
+            if collection_name == "set" and not _valid_set_element(element):
+                self._error(call.line, f"Set elements must be hashable or string arrays, got {element}")
             for actual in args[1:]:
                 self._expect(call.line, element, actual, f"{collection_name} element")
             return Type(collection_name, (element,))

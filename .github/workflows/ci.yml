@@ -33,6 +33,11 @@ jobs:
       - run: python zelix.py --check examples/game_2d.zelix
       - run: python zelix.py --check examples/game_3d.zelix
       - run: python zelix.py --check examples/game_multiplayer.zelix
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "7.6"
+      - run: gradle test
+        working-directory: examples/minecraft-zelix-loader
       - run: zelix --version
       - run: node --check extension.js
         working-directory: vscode-zelix

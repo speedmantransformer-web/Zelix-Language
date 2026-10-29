@@ -26,7 +26,7 @@ from syntax import (
 )
 from typesys import TypeChecker, TypeCheckError
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 
 class ZelixError(Exception):
     pass
@@ -42,6 +42,38 @@ class Function:
 class ReturnSignal(Exception):
     def __init__(self, value: Any):
         self.value = value
+
+
+class ZelixSet:
+    def __init__(self, values=()):
+        self._items: list[Any] = []
+        for value in values:
+            self.add(value)
+
+    def __contains__(self, value: Any) -> bool:
+        return any(item == value for item in self._items)
+
+    def __iter__(self):
+        return iter(self._items)
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def add(self, value: Any) -> None:
+        if value not in self:
+            self._items.append(value)
+
+    def remove(self, value: Any) -> None:
+        for index, item in enumerate(self._items):
+            if item == value:
+                del self._items[index]
+                return
+        raise KeyError(value)
+
+    def __repr__(self) -> str:
+        if not self._items:
+            return "set()"
+        return "{" + ", ".join(map(repr, self._items)) + "}"
 
 
 class Channel:
@@ -307,7 +339,7 @@ class Interpreter:
         if isinstance(expression, Input):
             if self.debugger:
                 self.error(expression.line, "Interactive input is not supported while debugging")
-            prompt = input(f"{expression.name}: ")
+            prompt = input(f"{expression.name}: " if expression.name else "")
             if expression.kind == "number":
                 try:
                     return float(prompt) if "." in prompt else int(prompt)
@@ -456,9 +488,9 @@ class Interpreter:
             if name == "tuple":
                 return tuple(args)
             if name == "set":
-                return set(args)
+                return ZelixSet(args)
             if name == "empty_set":
-                return set()
+                return ZelixSet()
             if name == "map":
                 if len(args) % 2:
                     self.error(line, "map expects alternating key and value arguments")
@@ -491,7 +523,7 @@ class Interpreter:
                     collection.pop(self._collection_index(key, len(collection), line))
                 elif isinstance(collection, dict):
                     del collection[key]
-                elif isinstance(collection, set):
+                elif isinstance(collection, ZelixSet):
                     collection.remove(key)
                 else:
                     self.error(line, "remove expects a list, map, or set")

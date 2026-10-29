@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2
+
+- Added `string` type highlighting and completion.
+- Added a snippet for sets of string arrays.
+- Documented string-array sets and the Zelix CLI 0.3.2 requirement.
+
 ## 0.4.1
 
 - Added static checking for annotations, generic function calls, collection types, tasks, and channels.

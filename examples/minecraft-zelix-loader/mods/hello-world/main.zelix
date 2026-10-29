@@ -1,0 +1,20 @@
+function handle_event taking event as text returning void
+    if event is "minecraft_version_1_8_8"
+        display text Hello World is running on Minecraft Java 1.8.8 end text
+    end if
+    if event is "minecraft_version_1_12_2"
+        display text Hello World is running on Minecraft Java 1.12.2 end text
+    end if
+    if event is "load"
+        display text Hello World mod loaded end text
+    end if
+    if event is "tick"
+        display text Hello World received a periodic client update end text
+    end if
+end function
+
+create loader_event as input text
+while loader_event is not "stop"
+    call handle_event with loader_event
+    loader_event becomes input text
+end loop

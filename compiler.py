@@ -106,6 +106,11 @@ class ExpressionIRParser:
         token = self.tokens[self.index]
         self.index += 1
         lower = token.lower()
+        if lower == "input" and self.index < len(self.tokens):
+            kind = self.tokens[self.index].lower()
+            if kind in {"text", "number"}:
+                self.index += 1
+                return Input(self.line, kind, "")
         if token == "(":
             expression = self._expression(0)
             if self.index >= len(self.tokens) or self.tokens[self.index] != ")":
@@ -945,6 +950,13 @@ class CGenerator:
             "    if (a.type == Z_STRING) return strcmp(a.string, b.string) == 0;",
             "    if (a.type == Z_NUMBER || a.type == Z_BOOLEAN) return a.number == b.number;",
             "    if (a.type == Z_NONE) return 1;",
+            "    if (a.type == Z_LIST) {",
+            "        if (a.collection == b.collection) return 1;",
+            "        if (!a.collection || !b.collection || a.collection->length != b.collection->length) return 0;",
+            "        for (size_t i = 0; i < a.collection->length; ++i)",
+            "            if (!z_value_equal(a.collection->items[i], b.collection->items[i])) return 0;",
+            "        return 1;",
+            "    }",
             "    return a.collection == b.collection;",
             "}",
             "static Value z_collection(ZType type, size_t count, Value *items, int line) {",
@@ -997,7 +1009,7 @@ class CGenerator:
             "        if (a.type == Z_STRING && b.type == Z_STRING) equal = strcmp(a.string, b.string) == 0;",
             "        else if ((a.type == Z_NUMBER || a.type == Z_BOOLEAN) &&",
             "                 (b.type == Z_NUMBER || b.type == Z_BOOLEAN)) equal = a.number == b.number;",
-            "        else if (a.type == b.type) equal = (a.type == Z_LIST || a.type == Z_MAP || a.type == Z_SET || a.type == Z_TUPLE) ? a.collection == b.collection : 1;",
+            "        else if (a.type == b.type) equal = a.type == Z_LIST ? z_value_equal(a, b) : (a.type == Z_MAP || a.type == Z_SET || a.type == Z_TUPLE) ? a.collection == b.collection : 1;",
             "        return z_bool(op == Z_EQ ? equal : !equal);",
             "    }",
             "    if ((op == Z_GT || op == Z_LT || op == Z_GTE || op == Z_LTE) &&",
@@ -1024,7 +1036,7 @@ class CGenerator:
             "    z_fail(line, \"Invalid operator\"); return z_none();",
             "}",
             "static Value z_input(int numeric, int line, const char *name) {",
-            "    char buffer[4096]; printf(\"%s: \", name); fflush(stdout);",
+            "    char buffer[4096]; if (name[0]) { printf(\"%s: \", name); fflush(stdout); }",
             "    if (!fgets(buffer, sizeof buffer, stdin)) z_fail(line, \"Could not read input\");",
             "    buffer[strcspn(buffer, \"\\r\\n\")] = '\\0';",
             "    if (!numeric) return z_str(z_copy(buffer));",

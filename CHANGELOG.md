@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2 - 2026-10-29
+
+- Added set support for string arrays, comparing array contents for duplicates, membership, and removal.
+- Added optional prompts for interactive input expressions.
+- Added an experimental LaunchWrapper event bridge example for Zelix Minecraft Java mods.
+- Updated the VS Code extension to 0.4.2 with string-array set syntax support.
+
 ## 0.3.1 - 2026-10-29
 
 - Fixed native C code generation for closing a channel.

@@ -23,6 +23,22 @@ from debug_server import DebugController, DebuggerStopped
 from syntax import Call, FunctionIR, Lexer, ModuleIR, parse_source
 from game_backend import GAME_FUNCTIONS, GAME_RUNTIME_C
 
+STRING_ARRAY_SET_SOURCE = (
+    "create labels as set<list<string>> with set with "
+    "(list with text red end text and text blue end text) and "
+    "(list with text red end text and text blue end text)\n"
+    "display length with labels\n"
+    "display contains with labels and "
+    "(list with text red end text and text blue end text)\n"
+    "call add_to_set with labels and (list with text green end text)\n"
+    "display length with labels\n"
+    "call remove with labels and "
+    "(list with text red end text and text blue end text)\n"
+    "display contains with labels and "
+    "(list with text red end text and text blue end text)\n"
+)
+
+
 class ZelixTests(unittest.TestCase):
     def test_math_words(self):
         self.assertEqual(ExpressionParser("10 plus 5 times 2", {}).parse(), 20)
@@ -36,6 +52,50 @@ class ZelixTests(unittest.TestCase):
             with contextlib.redirect_stdout(out):
                 Interpreter().run_file(p)
             self.assertEqual(out.getvalue().strip(), "15")
+
+    def test_input_expression_can_be_reassigned_without_a_prompt(self):
+        source = (
+            "create event as input text\n"
+            "event becomes input text\n"
+            "display event\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "input-expression.zelix"
+            path.write_text(source, encoding="utf-8")
+            output = io.StringIO()
+            with patch("builtins.input", side_effect=["first", "second"]) as read_input:
+                with contextlib.redirect_stdout(output):
+                    Interpreter().run_file(path)
+        self.assertEqual(output.getvalue().strip(), "second")
+        self.assertEqual(read_input.call_args_list[1].args, ("",))
+
+    def test_input_expression_is_generated_for_native_programs(self):
+        generated = CGenerator(parse_source(
+            "create event as text start end text\n"
+            "event becomes input text\n"
+        )).generate()
+        self.assertIn('z_input(0, 2, "")', generated)
+
+    def test_minecraft_zelix_loader_example_dispatches_events(self):
+        example = (
+            Path(__file__).resolve().parents[1]
+            / "examples"
+            / "minecraft-zelix-loader"
+            / "mods"
+            / "hello-world"
+            / "main.zelix"
+        )
+        validate_file(example)
+        output = io.StringIO()
+        with patch(
+            "builtins.input",
+            side_effect=["minecraft_version_1_12_2", "load", "tick", "stop"],
+        ):
+            with contextlib.redirect_stdout(output):
+                Interpreter().run_file(example)
+        self.assertIn("Hello World is running on Minecraft Java 1.12.2", output.getvalue())
+        self.assertIn("Hello World mod loaded", output.getvalue())
+        self.assertIn("Hello World received a periodic client update", output.getvalue())
 
     def test_function(self):
         src = "function add taking first and second\n    return first plus second\nend function\ncreate answer as add with 10 and 20\ndisplay answer\n"
@@ -185,6 +245,35 @@ class ZelixTests(unittest.TestCase):
             output.getvalue().splitlines(),
             ["9", "First item ID:", "15", "2", "8", "health", "4", "5", "6", "42"],
         )
+
+    def test_sets_of_string_arrays_in_interpreter(self):
+        validate_source(STRING_ARRAY_SET_SOURCE)
+        generated = CGenerator(parse_source(STRING_ARRAY_SET_SOURCE)).generate()
+        self.assertIn(
+            "if (!z_value_equal(a.collection->items[i], b.collection->items[i])) return 0;",
+            generated,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "string-array-set.zelix"
+            source.write_text(STRING_ARRAY_SET_SOURCE, encoding="utf-8")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                Interpreter().run_file(source)
+        self.assertEqual(output.getvalue().splitlines(), ["1", "True", "2", "False"])
+
+    @unittest.skipUnless(
+        shutil.which("cc") or shutil.which("gcc") or shutil.which("clang") or shutil.which("cl"),
+        "native C compiler is not installed",
+    )
+    def test_native_sets_of_string_arrays(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "string-array-set.zelix"
+            source.write_text(STRING_ARRAY_SET_SOURCE, encoding="utf-8")
+            executable, _ = compile_file(source)
+            result = subprocess.run(
+                [str(executable)], capture_output=True, text=True, check=True, timeout=15,
+            )
+        self.assertEqual(result.stdout.splitlines(), ["1", "True", "2", "False"])
 
     def test_collection_bounds_are_checked_at_runtime(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -641,7 +730,7 @@ class ZelixTests(unittest.TestCase):
 
         with contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(main(["--version"]), 0)
-        self.assertIn("Zelix 0.3.1", output.getvalue())
+        self.assertIn("Zelix 0.3.2", output.getvalue())
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "project"
@@ -884,7 +973,7 @@ class ZelixTests(unittest.TestCase):
         manifest = json.loads((root / "vscode-zelix" / "package.json").read_text(encoding="utf-8"))
         contributes = manifest["contributes"]
         self.assertIn('"debug_server"', package)
-        self.assertEqual(manifest["version"], "0.4.1")
+        self.assertEqual(manifest["version"], "0.4.2")
         self.assertEqual(manifest["icon"], "images/zelix-icon.png")
         self.assertEqual(contributes["debuggers"][0]["type"], "zelix")
         self.assertIn("zelix.debugCurrentFile", {
@@ -893,9 +982,14 @@ class ZelixTests(unittest.TestCase):
         extension_source = (root / "vscode-zelix" / "extension.js").read_text(encoding="utf-8")
         for feature in ("draw_sprite", "create_animation", "set_camera_2d", "mouse_world_x"):
             self.assertIn(f'"{feature}"', extension_source)
+        self.assertIn('"string"', extension_source)
+        grammar = (root / "vscode-zelix" / "syntaxes" / "zelix.tmLanguage.json").read_text(encoding="utf-8")
+        self.assertIn("|text|string|", grammar)
         for feature in ("sleep", "spawn_thread", "COLLECTION_FUNCTIONS"):
             self.assertIn(feature, extension_source)
-        self.assertIn('"Zelix async channel producer"', (root / "vscode-zelix" / "snippets" / "zelix.json").read_text(encoding="utf-8"))
+        extension_snippets = (root / "vscode-zelix" / "snippets" / "zelix.json").read_text(encoding="utf-8")
+        self.assertIn('"Zelix async channel producer"', extension_snippets)
+        self.assertIn('"Zelix set of string arrays"', extension_snippets)
 
     def test_benchmark_harness_smoke(self):
         root = Path(__file__).resolve().parents[1]

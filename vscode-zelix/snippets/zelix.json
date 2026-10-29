@@ -53,6 +53,15 @@
     ],
     "description": "Declare a generic function with a typed collection"
   },
+  "Zelix set of string arrays": {
+    "prefix": "stringarrayset",
+    "body": [
+      "create ${1:labels} as set<list<text>> with set",
+      "call add_to_set with ${1:labels} and (list with text ${2:red} end text and text ${3:blue} end text)",
+      "display contains with ${1:labels} and (list with text ${2:red} end text and text ${3:blue} end text)"
+    ],
+    "description": "Create a set that compares string arrays by their contents"
+  },
   "Zelix async channel producer": {
     "prefix": "async",
     "body": [
