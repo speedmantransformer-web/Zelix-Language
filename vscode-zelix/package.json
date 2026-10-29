@@ -3,7 +3,7 @@
   "displayName": "Zelix Language",
   "description": "Language support and project workflow for Zelix: completions, diagnostics, formatting, navigation, native builds, and local packages.",
   "version": "0.2.0",
-  "publisher": "zelix",
+  "publisher": "CloudZ",
   "icon": "images/zelix-icon.png",
   "license": "MIT",
   "repository": {

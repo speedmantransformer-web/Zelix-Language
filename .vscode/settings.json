@@ -5,7 +5,7 @@
   "editor.insertSpaces": true,
   "editor.tabSize": 4,
   "[zelix]": {
-    "editor.defaultFormatter": "zelix.zelix-language",
+    "editor.defaultFormatter": "CloudZ.zelix-language",
     "editor.formatOnSave": true
   }
 }

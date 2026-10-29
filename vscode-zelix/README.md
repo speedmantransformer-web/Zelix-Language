@@ -14,6 +14,10 @@ Zelix Language Support brings the Zelix programming language and project workflo
 
 Native compiler commands need a C compiler. Raylib game programs additionally need Raylib 5.0+ headers and libraries.
 
+## Install the extension
+
+In VS Code, search the Extensions view for **Zelix Language** by publisher **CloudZ**, or install `CloudZ.zelix-language`.
+
 ## Install Zelix
 
 Install the Zelix CLI from a Zelix source checkout's repository root using Python 3.10 or later:
@@ -125,7 +129,7 @@ Project imports require an up-to-date `zelix.lock`. Package dependencies are loc
 
 ## Publishing
 
-The Marketplace publisher ID in the manifest is `zelix`. A publisher administrator must own that ID and configure Marketplace Trusted Publishing for the repository and `.github/workflows/publish-vscode-extension.yml` before the manual publishing workflow can run. The workflow publishes only when the requested version matches this extension's manifest.
+The Marketplace publisher ID in the manifest is `CloudZ`. A publisher administrator must configure Marketplace Trusted Publishing for the repository and `.github/workflows/publish-vscode-extension.yml` before the publishing workflow can run. The workflow publishes only when the requested version matches this extension's manifest.
 
 ## License
 
