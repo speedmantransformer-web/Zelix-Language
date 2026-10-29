@@ -943,7 +943,7 @@ class CGenerator:
             "    ZCollection *collection = (ZCollection *)calloc(1, sizeof(ZCollection));",
             "    if (!collection) z_fail(line, \"Out of memory allocating collection\");",
             "    collection->type = type; z_lock_registry(); collection->next = z_collections; z_collections = collection; z_unlock_registry();",
-            "    collection->capacity = count; collection->length = type == Z_MAP ? count / 2 : 0;",
+            "    collection->capacity = count; collection->length = 0;",
             "    if (count) { collection->items = (Value *)malloc(count * sizeof(Value)); if (!collection->items) z_fail(line, \"Out of memory allocating collection items\"); }",
             "    if (type == Z_SET) { for (size_t i = 0; i < count; ++i) { bool found = false; for (size_t j = 0; j < collection->length; ++j) if (z_value_equal(collection->items[j], items[i])) found = true; if (!found) collection->items[collection->length++] = items[i]; } }",
             "    else if (type == Z_MAP) { for (size_t i = 0; i < count; i += 2) { size_t found = collection->length; for (size_t j = 0; j < collection->length; ++j) if (z_value_equal(collection->items[j * 2], items[i])) { found = j; break; } if (found < collection->length) collection->items[found * 2 + 1] = items[i + 1]; else { collection->items[collection->length * 2] = items[i]; collection->items[collection->length * 2 + 1] = items[i + 1]; ++collection->length; } } }",

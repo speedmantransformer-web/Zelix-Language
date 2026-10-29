@@ -252,6 +252,30 @@ class ZelixTests(unittest.TestCase):
             ["9", "First item ID:", "15", "2", "8", "health", "4", "5", "6", "42"],
         )
 
+    @unittest.skipUnless(
+        shutil.which("cc") or shutil.which("gcc") or shutil.which("clang") or shutil.which("cl"),
+        "native C compiler is not installed",
+    )
+    def test_native_map_initialization_and_growth(self):
+        source_text = (
+            "create records as map<number, number> with map with "
+            "1 and 10 and 2 and 20 and 3 and 30\n"
+            "call put with records and 2 and 25\n"
+            "call put with records and 4 and 40\n"
+            "display length with records\n"
+            "display get with records and 1\n"
+            "display get with records and 2\n"
+            "display get with records and 4\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "map.zelix"
+            source.write_text(source_text, encoding="utf-8")
+            executable, _ = compile_file(source)
+            result = subprocess.run(
+                [str(executable)], capture_output=True, text=True, check=True, timeout=15,
+            )
+        self.assertEqual(result.stdout.splitlines(), ["4", "10", "25", "40"])
+
     def test_raylib_game_api_codegen(self):
         source = (
             'call init_window with 640 and 480 and text Game end text\n'
