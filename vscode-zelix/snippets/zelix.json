@@ -44,6 +44,31 @@
     ],
     "description": "Function declaration"
   },
+  "Zelix generic function": {
+    "prefix": "generic",
+    "body": [
+      "function ${1:first}<T> taking ${2:items} as list<T> returning T",
+      "\treturn get with ${2:items} and 0",
+      "end function"
+    ],
+    "description": "Declare a generic function with a typed collection"
+  },
+  "Zelix async channel producer": {
+    "prefix": "async",
+    "body": [
+      "async function ${1:produce} taking ${2:output} as channel<number> returning void",
+      "\tawait send with ${2:output} and ${3:42}",
+      "\tcall close_channel with ${2:output}",
+      "end function",
+      "",
+      "create ${4:messages} as channel<number> with channel with 1",
+      "create ${5:producer} as spawn ${1:produce} with ${4:messages}",
+      "create ${6:answer} as await receive with ${4:messages}",
+      "await ${5:producer}",
+      "display ${6:answer}"
+    ],
+    "description": "Create an async producer and consume its typed channel message"
+  },
   "Zelix text": {
     "prefix": "text",
     "body": [

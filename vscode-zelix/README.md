@@ -10,11 +10,16 @@ Zelix Language Support brings the Zelix programming language and project workflo
 - Live diagnostics from the Zelix CLI as you edit.
 - Document formatting and go-to-definition for local functions, variables, parameters, and loop variables.
 - Commands and tasks to run a program, compile a native executable, inspect optimized IR, initialize a Zelix project, and lock local path dependencies.
-- A Zelix debugger with breakpoints, step controls, call stacks, local variables, and program output.
+- Game APIs for texture-backed sprites, 2D cameras, animation state machines, keyboard/mouse input, project-relative asset validation, and opt-in texture hot reload.
+- Static type checking for annotations, generic functions, typed collections, tasks, and channels.
+- Generic lists, maps, sets, and tuples, plus collection bounds checks.
+- Async tasks, `await`, channels, `sleep`, and explicit worker-thread functions.
 - Snippets for common language constructs, 2D/3D drawing, scenes, physics, and UDP messaging.
 - A Zelix file icon theme.
 
 Native compiler commands need a C compiler. Raylib game programs additionally need Raylib 5.0+ headers and libraries.
+
+`load_texture` and `load_sound` asset paths are resolved relative to the `.zelix` source file and checked for existence and supported formats during file validation/builds. `enable_asset_hot_reload` checks loaded textures at the start of each drawing frame. See `examples/game_sprites.zelix` for sprite-sheet animations, state transitions, camera use, and hot reload; supply the referenced sprite sheets before compiling.
 
 ## Install the extension
 
@@ -134,6 +139,25 @@ otherwise
     display text Keep practicing end text
 end if
 ```
+
+## Types, collections, and concurrency
+
+Use annotations for static checking and generic types for collection contents:
+
+```zelix
+function first<T> taking items as list<T> returning T
+    return get with items and 0
+end function
+
+create scores as list<number> with list with 7 and 12
+display first with scores
+```
+
+Collections include `list`, `map`, `set`, `tuple`, `append`, `insert`, `add_to_set`, `put`, `get`, `remove`, `contains`, and `length`. Invalid indexes fail with a Zelix error instead of accessing outside a collection.
+
+Async functions, `spawn`, `await`, channels, and `sleep` support concurrent work. Use `spawn_thread with function_name and arguments` to run a synchronous function on a worker thread. Concurrent functions need explicitly typed safe parameters and cannot access mutable globals or invoke Raylib APIs. The interpreter schedules async functions cooperatively; native programs implement spawned tasks using OS threads.
+
+The [concurrency and collections example](../examples/concurrency_and_collections.zelix) demonstrates typed generic functions, collection operations, producer/consumer channels, async sleep, and a worker thread. Run it from the repository root with `zelix examples/concurrency_and_collections.zelix`.
 
 ## Commands
 

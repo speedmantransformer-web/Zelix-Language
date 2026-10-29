@@ -1,6 +1,6 @@
 # Zelix Programming Language
 
-**Zelix 0.2.0 (alpha)** is a keyword-driven programming language with an interpreter, an optimizing native compiler for Windows and Linux, Raylib game APIs, local path-based packages, and VS Code tooling. Zelix has not declared a stable 1.0 release.
+**Zelix 0.3.0 (alpha)** is a keyword-driven programming language with an interpreter, an optimizing native compiler for Windows and Linux, static types, generic collections, async concurrency, Raylib game APIs, local path-based packages, and VS Code tooling. Zelix has not declared a stable 1.0 release.
 
 The interpreter remains available for quick iteration. Native compilation lowers Zelix programs into an intermediate representation (IR), folds constant expressions and branches, then emits C for a platform-native compiler. VS Code support includes completion, validation diagnostics, formatting, go-to-definition, run/build commands, and an interpreter-backed source debugger with breakpoints, stepping, stack frames, local variables, and program output. Interactive `input` statements are not supported in a debugger session.
 
@@ -78,6 +78,9 @@ Hello from Zelix
 - Comparisons: `is`, `is not`, `is greater than`, `is less than`, `is greater than or equal to`, `is less than or equal to`
 - Logic: `and`, `or`, `not`
 - Boolean values: `true`, `false`
+- Type annotations: `create score as number with 3`
+- Generic collection types: `list<number>`, `map<text, number>`, `set<number>`, `tuple<number, text>`
+- Concurrency: `async function`, `await`, `spawn`, `spawn_thread`, and typed channels
 
 Statements are line-based and blocks end with explicit keywords. Periods at the end of statements are optional. Commas are available for separating values, but are not required for ordinary statements.
 
@@ -110,11 +113,47 @@ create answer as add with 10 and 20
 display answer
 ```
 
-Parameters are separated by the word `and`. For now, function calls support simple arguments (numbers, booleans, variable names, or a single text literal written as `text ... end text`).
+Parameters are separated by the word `and`. Function calls accept nested expressions; use parentheses when a nested call contains `and` so argument separators stay unambiguous.
+
+## Types, collections, and concurrency
+
+The static checker verifies annotated declarations and function signatures, generic calls, collection element/key types, and task/channel types before interpretation or native compilation. Unannotated values remain dynamically typed (`any`), so annotate public and concurrent function boundaries to get stronger checks. Generic functions use uppercase type variables:
+
+```zelix
+function first<T> taking items as list<T> returning T
+    return get with items and 0
+end function
+
+create scores as list<number> with list with 7 and 12
+display first with scores
+```
+
+Collection constructors and operations include `list`, `map`, `set`, `tuple`, `empty_list`, `empty_map`, `empty_set`, `append`, `insert`, `add_to_set`, `put`, `get`, `remove`, `contains`, `length`, `keys`, and `values`. Lists and tuples use zero-based indexes; invalid indexes and invalid map/set operations produce Zelix errors. Map keys and set elements must be hashable: primitive values and tuples of hashable values.
+
+Use async functions and channels for tasks. `sleep` yields for a duration in seconds; channel capacity `0` is unbounded:
+
+```zelix
+async function produce taking output as channel<number> returning void
+    await send with output and 42
+    call close_channel with output
+end function
+
+create messages as channel<number> with channel with 1
+create producer as spawn produce with messages
+create answer as await receive with messages
+await producer
+display answer
+```
+
+Use `spawn_thread with function_name and arguments` for a synchronous function that can run independently. Concurrent functions require explicitly typed, concurrency-safe parameters and return types; mutable global access and Raylib calls from concurrent functions are rejected. The interpreter schedules async tasks cooperatively and runs explicit threads on worker threads. The native backend uses operating-system threads for spawned tasks and thread functions, so scheduling details differ by backend.
+
+The interpreter relies on Python-managed memory. Native generated programs check collection bounds/capacity, track their allocations, and reclaim them on normal process shutdown; this initial arena-style strategy prevents dangling collection references but does not reclaim short-lived allocations during a long-running process. Resource APIs such as textures and sounds still require their matching unload calls.
+
+Run `zelix examples/concurrency_and_collections.zelix` for an end-to-end example covering generic functions, typed collections, channels, async sleep, and a worker thread.
 
 ## VS Code integration
 
-The `vscode-zelix` 0.3.0 extension provides syntax highlighting, keyword/variable/function/game API completions, compiler-backed error highlighting, document formatting, go-to-definition for functions, parameters, variables, and counted-loop variables, plus interpreter-backed debugging. Commands include **Zelix: Run Current File**, **Zelix: Debug Current File**, **Zelix: Compile Current File**, **Zelix: Show Optimized IR**, **Zelix: Initialize Project**, and **Zelix: Install Local Packages**, plus a status-bar Run button. Install the Zelix 0.2.0 CLI separately for execution, validation, and source debugging.
+The `vscode-zelix` 0.4.0 extension provides syntax highlighting, keyword/variable/function/game/collection/concurrency completions, compiler-backed error highlighting, document formatting, go-to-definition for functions, parameters, variables, and counted-loop variables, plus interpreter-backed debugging. Commands include **Zelix: Run Current File**, **Zelix: Debug Current File**, **Zelix: Compile Current File**, **Zelix: Show Optimized IR**, **Zelix: Initialize Project**, and **Zelix: Install Local Packages**, plus a status-bar Run button. Install the Zelix 0.3.0 CLI separately for execution, validation, and source debugging.
 
 The workspace includes run/build/IR tasks and native debug configurations. VS Code recommends the Zelix extension and the Microsoft C/C++ extension; the latter is needed to debug native builds.
 
@@ -125,7 +164,7 @@ The workspace includes run/build/IR tasks and native debug configurations. VS Co
    - **Windows:** `%USERPROFILE%\\.vscode\\extensions`
    - **macOS/Linux:** `~/.vscode/extensions`
 3. Copy the entire `vscode-zelix` folder into that extensions folder.
-4. Rename the copied folder to `zelix-language-0.3.0` if desired.
+4. Rename the copied folder to `zelix-language-0.4.0` if desired.
 5. Reopen VS Code.
 6. Open a `.zelix` file. The language mode should show **Zelix** in the status bar.
 7. If the language CLI is not beside the installed extension, set `zelix.cliPath` to the full path of `zelix.py`. Set `zelix.pythonPath` if the Python command on your system is not `python`.
@@ -172,9 +211,9 @@ zelix --compile --debug path/to/program.zelix
 
 ## Native compiler coverage and limitations
 
-The native backend supports variables, expressions, output, input, conditionals, loops, and functions. It uses the host C compiler to produce a native executable and currently targets the host Windows or Linux platform; cross-compilation is not supported. The generated runtime uses dynamically typed values, matching the prototype language rather than providing static type checking.
+The native backend supports variables, expressions, output, input, conditionals, loops, functions, typed collections, async tasks, channels, and worker threads. It uses the host C compiler to produce a native executable and currently targets the host Windows or Linux platform; cross-compilation is not supported. Generated values use a tagged runtime representation, while the static checker validates annotated types before code generation.
 
-Classes, concurrency, static type checking, source-mapped debugging, and advanced physics/game-engine features are not implemented yet. Package imports are limited to local path dependencies with globally shared function names.
+Classes, source-mapped native debugging, and a remote package registry are not implemented yet. Package imports are limited to local path dependencies with globally shared function names.
 
 ## Projects and packages
 
@@ -234,11 +273,23 @@ end loop
 call close_window
 ```
 
-Available drawing/input calls include `draw_circle`, `draw_line`, `draw_text`, `key_pressed`, `key_down`, `key_released`, `mouse_x`, `mouse_y`, `mouse_button_pressed`, and `mouse_wheel`. For 3D, bracket `draw_cube` and `draw_sphere` calls with `begin_3d` and `end_3d`; this initial backend supplies a fixed perspective camera.
+Available drawing/input calls include `draw_circle`, `draw_line`, `draw_text`, `key_pressed`, `key_down`, `key_released`, `mouse_x`, `mouse_y`, `mouse_button_pressed`, `mouse_button_down`, `mouse_button_released`, `mouse_wheel`, `mouse_world_x`, and `mouse_world_y`. Set a 2D camera using `set_camera_2d` (target x/y, offset x/y, zoom, rotation), then bracket world-space drawing with `begin_camera_2d` and `end_camera_2d`. For 3D, bracket `draw_cube` and `draw_sphere` calls with `begin_3d` and `end_3d`; this initial backend supplies a fixed perspective camera.
+
+### Sprites, textures, and animation
+
+`load_texture` loads an image relative to the `.zelix` file and returns a texture handle. Draw it with `draw_sprite` or `draw_sprite_ex`; query its pixel dimensions with `texture_width` and `texture_height`, and release it with `unload_texture`.
+
+`create_animation` takes a texture handle, frame width, frame height, frame count, and frames per second. It reads row-major frames from a sprite sheet. `update_animation` advances it by a delta in seconds; `draw_animation` draws the current frame at x/y with a scale. Animations loop by default; `set_animation_looping` can make them play once, and `animation_frame` reports the current frame.
+
+An animation machine groups named animations and transitions. Add states with `add_animation_state`, transitions with `add_animation_transition` (machine, from-state, event, to-state), then trigger them with `trigger_animation_event`; it returns true when a transition is taken. Update and draw the active state with `update_animation_machine` and `draw_animation_machine`. Game code decides when to send transition events, for example when movement input changes.
+
+Call `enable_asset_hot_reload` once to check loaded texture file timestamps at each `begin_drawing`; changed valid images replace the old texture while preserving the previous texture if the replacement is invalid. Sounds are not hot-reloaded. `--check` and native compilation verify literal texture/sound asset paths exist next to the source file and use a supported image/audio extension; paths computed at runtime can only be checked when loaded.
+
+See [examples/game_sprites.zelix](./examples/game_sprites.zelix) for a camera, two sprite sheets, keyboard-driven animation state transitions, and hot reload. Add `assets/idle.png` and `assets/walk.png` next to that example before compiling it.
 
 ### Audio
 
-Call `init_audio` before `load_sound`. Sound files are loaded relative to the game's working directory; use `play_sound`, `unload_sound`, and `close_audio` to manage playback and resources.
+Call `init_audio` before `load_sound`. Sound files are loaded relative to the `.zelix` source file; use `play_sound`, `unload_sound`, and `close_audio` to manage playback and resources.
 
 ### Scenes and physics
 
@@ -250,13 +301,11 @@ Call `init_audio` before `load_sound`. Sound files are loaded relative to the ga
 
 `network_start` opens a non-blocking IPv4 UDP socket on a local port. `network_send` sends a text datagram to an IPv4 address and port; `network_receive` returns the next message or empty text if none is available; `network_close` closes the socket. UDP is connectionless and does not guarantee delivery or ordering, so applications should add acknowledgement/retry logic if their game requires it.
 
-See [examples/game_2d.zelix](./examples/game_2d.zelix), [examples/game_3d.zelix](./examples/game_3d.zelix), and [examples/game_multiplayer.zelix](./examples/game_multiplayer.zelix). The VS Code extension includes `game2d`, `draw3d`, `scene`, and `body` snippets.
+See [examples/game_2d.zelix](./examples/game_2d.zelix), [examples/game_sprites.zelix](./examples/game_sprites.zelix), [examples/game_3d.zelix](./examples/game_3d.zelix), and [examples/game_multiplayer.zelix](./examples/game_multiplayer.zelix). The VS Code extension includes `game2d`, `draw3d`, `scene`, and `body` snippets.
 
-## Roadmap
+## Remaining roadmap
 
-1. Stabilize lexer/parser and add automated tests.
-2. Improve function grammar, diagnostics, and types.
-3. Add lists and richer data structures.
-4. Add a language server and formatter.
-5. Expand native compiler optimization, diagnostics, and platform coverage.
-6. Expand Raylib APIs, physics, networking, and game examples.
+1. Add native source-mapped debugging and stronger resource lifetime analysis.
+2. Expand native compiler optimizations and verify generated concurrency code with Windows and Linux toolchains.
+3. Add remote package registry support and package namespaces.
+4. Continue expanding game APIs and examples based on tested platform support.

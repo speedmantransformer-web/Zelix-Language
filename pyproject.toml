@@ -31,7 +31,7 @@ dependencies = ["tomli>=2; python_version < '3.11'"]
 zelix = "zelix:main"
 
 [tool.setuptools]
-py-modules = ["zelix", "compiler", "game_backend", "project", "debug_server"]
+py-modules = ["zelix", "compiler", "game_backend", "project", "debug_server", "syntax", "typesys"]
 include-package-data = true
 
 [tool.setuptools.dynamic]

@@ -15,11 +15,13 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from zelix import Interpreter, ExpressionParser, ZelixError
 from compiler import (
-    CGenerator, CompileError, ZelixParser, compile_file, emit_ir_file,
-    validate_file, validate_source,
+    CGenerator, CompileError, ZelixParser, compile_file, emit_ir_file, format_ir,
+    optimize, validate_file, validate_source,
 )
 from project import ProjectError, init_project, install_project
 from debug_server import DebugController, DebuggerStopped
+from syntax import Call, FunctionIR, Lexer, ModuleIR, parse_source
+from game_backend import GAME_FUNCTIONS, GAME_RUNTIME_C
 
 class ZelixTests(unittest.TestCase):
     def test_math_words(self):
@@ -44,6 +46,48 @@ class ZelixTests(unittest.TestCase):
             with contextlib.redirect_stdout(out):
                 Interpreter().run_file(p)
             self.assertEqual(out.getvalue().strip(), "30")
+
+    def test_interpreter_and_compiler_share_parser_and_support_nested_calls(self):
+            source = (
+                "function add taking first and second\n"
+                "    return first plus second\n"
+                "end function\n"
+                "function identity taking value\n"
+                "    return value\n"
+                "end function\n"
+                "create answer as add with (identity with (2 plus 3)) and 4\n"
+                "create phrase as identity with text apples and oranges end text\n"
+                "display answer\n"
+                "display phrase\n"
+            )
+            module = parse_source(source)
+            self.assertIsInstance(module, ModuleIR)
+            self.assertIsInstance(module.functions[0], FunctionIR)
+            self.assertIsInstance(module.body[0].value, Call)
+            self.assertEqual(
+                [token.value for token in Lexer("add with (2 plus 3) and 4").tokenize()],
+                ["add", "with", "(", "2", "plus", "3", ")", "and", "4"],
+            )
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "nested-calls.zelix"
+                path.write_text(source, encoding="utf-8")
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    Interpreter().run_file(path)
+            self.assertEqual(output.getvalue().splitlines(), ["9", "apples and oranges"])
+
+    def test_optimizer_inlines_small_pure_function_calls(self):
+            source = (
+                "function square taking value\n"
+                "    return value times value\n"
+                "end function\n"
+                "create result as square with 9\n"
+            )
+            optimized_ir = format_ir(optimize(parse_source(source)))
+            self.assertIn("%result = create (mul 9, 9)", optimized_ir)
+            self.assertNotIn("@square(", optimized_ir.split("module zelix", 1)[1].split("%result", 1)[-1])
+            debug_ir = format_ir(optimize(parse_source(source), inline=False))
+            self.assertIn("@square(", debug_ir)
 
     def test_operator_precedence_and_comparisons(self):
         self.assertEqual(ExpressionParser("2 plus 3 times 4", {}).parse(), 14)
@@ -91,6 +135,110 @@ class ZelixTests(unittest.TestCase):
         with self.assertRaisesRegex(CompileError, "Line 1: Unknown variable"):
             validate_source("display missing\n")
 
+    def test_static_types_and_generic_functions(self):
+        source = (
+            "function identity<T> taking value as T returning T\n"
+            "    return value\n"
+            "end function\n"
+            "create answer as identity with 41\n"
+            "display answer plus 1\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "generic.zelix"
+            path.write_text(source, encoding="utf-8")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                Interpreter().run_file(path)
+        self.assertEqual(output.getvalue().strip(), "42")
+        with self.assertRaisesRegex(CompileError, "expects number, got text"):
+            validate_source("create score as number with text wrong end text\n")
+        with self.assertRaisesRegex(CompileError, "expects number, got text"):
+            validate_source(
+                "function only_number taking value as number returning number\n"
+                "    return value\n"
+                "end function\n"
+                "create mismatch as only_number with text no end text\n"
+            )
+        with self.assertRaisesRegex(CompileError, "list element expects number, got text"):
+            validate_source(
+                "create scores as list<number> with list with 1 and text wrong end text\n"
+            )
+        with self.assertRaisesRegex(CompileError, "Set elements must be hashable"):
+            validate_source(
+                "create nested as set<list<number>> with set with (list with 1)\n"
+            )
+        with self.assertRaisesRegex(CompileError, "must type parameter"):
+            validate_source(
+                "async function unsafe taking value returning void\n"
+                "end function\n"
+                "create task as spawn unsafe with 1\n"
+            )
+
+    def test_concurrency_and_collection_example(self):
+        root = Path(__file__).resolve().parents[1]
+        example = root / "examples" / "concurrency_and_collections.zelix"
+        validate_file(example)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            Interpreter().run_file(example)
+        self.assertEqual(
+            output.getvalue().splitlines(),
+            ["9", "First item ID:", "15", "2", "8", "health", "4", "5", "6", "42"],
+        )
+
+    def test_collection_bounds_are_checked_at_runtime(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "bounds.zelix"
+            source.write_text(
+                "create items as list<number> with list with 1\n"
+                "display get with items and 1\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ZelixError, "out of range"):
+                Interpreter().run_file(source)
+
+    def test_native_concurrency_runtime_generation(self):
+        source = (
+            "async function pause returning void\n"
+            "    await sleep with 0.001\n"
+            "end function\n"
+            "function double taking value as number returning number\n"
+            "    return value times 2\n"
+            "end function\n"
+            "create task as spawn pause\n"
+            "await task\n"
+            "create worker as spawn_thread with double and 21\n"
+            "display await worker\n"
+        )
+        validate_source(source)
+        generated = CGenerator(parse_source(source)).generate()
+        self.assertIn("#include <pthread.h>", generated)
+        self.assertIn("z_async_sleep", generated)
+        self.assertIn("nanosleep", generated)
+        self.assertIn("pthread_create", generated)
+        self.assertIn("z_task_cleanup();", generated)
+
+    @unittest.skipUnless(
+        shutil.which("cc") or shutil.which("gcc") or shutil.which("clang") or shutil.which("cl"),
+        "native C compiler is not installed",
+    )
+    def test_native_concurrency_compile_and_run(self):
+        root = Path(__file__).resolve().parents[1]
+        example = (root / "examples" / "concurrency_and_collections.zelix").read_text(
+            encoding="utf-8"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "concurrency.zelix"
+            source.write_text(example, encoding="utf-8")
+            executable, _ = compile_file(source)
+            result = subprocess.run(
+                [str(executable)], capture_output=True, text=True, check=True, timeout=15,
+            )
+        self.assertEqual(
+            result.stdout.splitlines(),
+            ["9", "First item ID:", "15", "2", "8", "health", "4", "5", "6", "42"],
+        )
+
     def test_raylib_game_api_codegen(self):
         source = (
             'call init_window with 640 and 480 and text Game end text\n'
@@ -114,6 +262,70 @@ class ZelixTests(unittest.TestCase):
         generated = CGenerator(ZelixParser(source).parse()).generate()
         self.assertIn("sound.frameCount == 0", generated)
         self.assertNotIn("IsSoundValid(", generated)
+
+    def test_game_sprite_animation_camera_and_input_codegen(self):
+        source = (
+            'call init_window with 640 and 360 and text Sprites end text\n'
+            'call set_camera_2d with 0 and 0 and 320 and 180 and 1 and 0\n'
+            'call enable_asset_hot_reload\n'
+            'create texture as load_texture with text assets/player.png end text\n'
+            'create animation as create_animation with texture and 32 and 32 and 4 and 8\n'
+            'create machine as create_animation_machine\n'
+            'call add_animation_state with machine and text idle end text and animation\n'
+            'call add_animation_state with machine and text walk end text and animation\n'
+            'call add_animation_transition with machine and text idle end text and text move end text and text walk end text\n'
+            'while not window_should_close\n'
+            '    if key_pressed with text right end text\n'
+            '        call trigger_animation_event with machine and text move end text\n'
+            '    end if\n'
+            '    call update_animation_machine with machine and frame_time\n'
+            '    call begin_drawing\n'
+            '    call clear_background with text raywhite end text\n'
+            '    call begin_camera_2d\n'
+            '    call draw_animation_machine with machine and 0 and 0 and 2\n'
+            '    call end_camera_2d\n'
+            '    call end_drawing\n'
+            'end loop\n'
+            'call unload_texture with texture\n'
+            'call close_window\n'
+        )
+        generated = CGenerator(parse_source(source)).generate()
+        for expected in (
+            "LoadTexture(", "DrawTexturePro(", "GetFileModTime(",
+            "BeginMode2D(", "EndMode2D(", "IsKeyPressed(",
+            "z_animation_machines", "Z_GAME_ADD_ANIMATION_TRANSITION",
+            "Z_GAME_TRIGGER_ANIMATION_EVENT", "#define Z_ASSET_ROOT",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, generated)
+        for function in GAME_FUNCTIONS:
+            with self.subTest(game_function=function):
+                self.assertIn(f"case Z_GAME_{function.upper()}", GAME_RUNTIME_C)
+
+    def test_asset_validation_checks_files_formats_and_project_relative_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "assets").mkdir()
+            (root / "assets" / "hero.png").write_bytes(b"placeholder image")
+            source = root / "game.zelix"
+            source.write_text(
+                "create hero as load_texture with text assets/hero.png end text\n",
+                encoding="utf-8",
+            )
+            validate_file(source)
+            source.write_text(
+                "create hero as load_texture with text assets/missing.png end text\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(CompileError, "does not exist"):
+                validate_file(source)
+            source.write_text(
+                "create hero as load_texture with text assets/hero.txt end text\n",
+                encoding="utf-8",
+            )
+            (root / "assets" / "hero.txt").write_text("not an image", encoding="utf-8")
+            with self.assertRaisesRegex(CompileError, "Unsupported texture asset format"):
+                validate_file(source)
 
     def test_game_api_argument_validation(self):
         with self.assertRaisesRegex(CompileError, "Game API init_window expects 3 arguments, got 2"):
@@ -172,6 +384,7 @@ class ZelixTests(unittest.TestCase):
         for example in (
             "hello.zelix", "basics.zelix", "functions.zelix", "loops.zelix",
             "input.zelix", "game_2d.zelix", "game_3d.zelix", "game_multiplayer.zelix",
+            "game_sprites.zelix",
         ):
             with self.subTest(example=example):
                 validate_source((root / "examples" / example).read_text(encoding="utf-8"))
@@ -389,7 +602,7 @@ class ZelixTests(unittest.TestCase):
 
         with contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(main(["--version"]), 0)
-        self.assertIn("Zelix 0.2.0", output.getvalue())
+        self.assertIn("Zelix 0.3.0", output.getvalue())
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "project"
@@ -632,12 +845,18 @@ class ZelixTests(unittest.TestCase):
         manifest = json.loads((root / "vscode-zelix" / "package.json").read_text(encoding="utf-8"))
         contributes = manifest["contributes"]
         self.assertIn('"debug_server"', package)
-        self.assertEqual(manifest["version"], "0.3.0")
+        self.assertEqual(manifest["version"], "0.4.0")
         self.assertEqual(manifest["icon"], "images/zelix-icon.png")
         self.assertEqual(contributes["debuggers"][0]["type"], "zelix")
         self.assertIn("zelix.debugCurrentFile", {
             command["command"] for command in contributes["commands"]
         })
+        extension_source = (root / "vscode-zelix" / "extension.js").read_text(encoding="utf-8")
+        for feature in ("draw_sprite", "create_animation", "set_camera_2d", "mouse_world_x"):
+            self.assertIn(f'"{feature}"', extension_source)
+        for feature in ("sleep", "spawn_thread", "COLLECTION_FUNCTIONS"):
+            self.assertIn(feature, extension_source)
+        self.assertIn('"Zelix async channel producer"', (root / "vscode-zelix" / "snippets" / "zelix.json").read_text(encoding="utf-8"))
 
     def test_benchmark_harness_smoke(self):
         root = Path(__file__).resolve().parents[1]

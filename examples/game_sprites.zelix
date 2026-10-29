@@ -1,0 +1,36 @@
+# Add an idle.png and walk.png sprite sheet (32x32 frames) under examples/assets.
+call init_window with 800 and 450 and text Zelix Sprite Demo end text
+call set_target_fps with 60
+call set_camera_2d with 0 and 0 and 400 and 225 and 1 and 0
+call enable_asset_hot_reload
+
+create idle_texture as load_texture with text assets/idle.png end text
+create walk_texture as load_texture with text assets/walk.png end text
+create idle_animation as create_animation with idle_texture and 32 and 32 and 4 and 8
+create walk_animation as create_animation with walk_texture and 32 and 32 and 6 and 12
+create animations as create_animation_machine
+call add_animation_state with animations and text idle end text and idle_animation
+call add_animation_state with animations and text walk end text and walk_animation
+call add_animation_transition with animations and text idle end text and text move end text and text walk end text
+call add_animation_transition with animations and text walk end text and text stop end text and text idle end text
+
+while not window_should_close
+    if key_down with text right end text
+        call trigger_animation_event with animations and text move end text
+    otherwise
+        call trigger_animation_event with animations and text stop end text
+    end if
+    call update_animation_machine with animations and frame_time
+
+    call begin_drawing
+    call clear_background with text raywhite end text
+    call begin_camera_2d
+    call draw_animation_machine with animations and 384 and 208 and 1
+    call draw_text with text Edit sprite sheets to hot reload end text and 16 and 16 and 20 and text darkgray end text
+    call end_camera_2d
+    call end_drawing
+end loop
+
+call unload_texture with idle_texture
+call unload_texture with walk_texture
+call close_window

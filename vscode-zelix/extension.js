@@ -11,6 +11,14 @@ const KEYWORDS = [
   "greater than", "less than", "greater than or equal to",
   "less than or equal to", "equals", "is not", "plus", "minus", "times",
   "divided by", "remainder",
+  "async", "await", "spawn", "number", "boolean", "void", "list", "map",
+  "set", "tuple", "channel", "task", "returning",
+];
+const COLLECTION_FUNCTIONS = [
+  "list", "map", "set", "tuple", "empty_list", "empty_map", "empty_set",
+  "append", "insert", "add_to_set", "put", "get", "remove", "contains",
+  "length", "keys", "values", "channel", "send", "receive", "close_channel",
+  "sleep", "spawn_thread",
 ];
 const GAME_FUNCTIONS = [
   "init_window", "close_window", "window_should_close", "frame_time",
@@ -18,6 +26,15 @@ const GAME_FUNCTIONS = [
   "draw_rectangle", "draw_circle", "draw_line", "draw_text", "begin_3d",
   "end_3d", "draw_cube", "draw_sphere", "key_pressed", "key_down",
   "key_released", "mouse_x", "mouse_y", "mouse_button_pressed", "mouse_wheel",
+  "mouse_button_down", "mouse_button_released", "mouse_world_x", "mouse_world_y",
+  "load_texture", "unload_texture", "draw_sprite", "draw_sprite_ex",
+  "texture_width", "texture_height", "enable_asset_hot_reload",
+  "create_animation", "update_animation", "draw_animation",
+  "set_animation_looping", "animation_frame", "create_animation_machine",
+  "add_animation_state", "add_animation_transition", "set_animation_state",
+  "trigger_animation_event", "update_animation_machine",
+  "draw_animation_machine", "set_camera_2d", "begin_camera_2d",
+  "end_camera_2d",
   "init_audio", "load_sound", "play_sound", "unload_sound", "close_audio",
   "create_scene", "activate_scene", "create_object", "add_object", "move_object",
   "set_object_position", "draw_scene", "clear_scene", "create_body",
@@ -26,7 +43,7 @@ const GAME_FUNCTIONS = [
   "network_receive", "network_close",
 ];
 
-const BLOCK_START = /^(?:if\b|while\b|repeat\b|function\b)/i;
+const BLOCK_START = /^(?:if\b|while\b|repeat\b|(?:async\s+)?function\b)/i;
 const BLOCK_END = /^end\s+(?:if|loop|function)\b/i;
 const BLOCK_MIDDLE = /^otherwise\b/i;
 
@@ -45,13 +62,14 @@ function sourceDefinitions(document) {
     const text = document.lineAt(line).text;
     let match = /^\s*create\s+([A-Za-z_]\w*)\s+as\b/i.exec(text);
     if (match) add(match[1], line, text.indexOf(match[1]));
-    match = /^\s*function\s+([A-Za-z_]\w*)(?:\s+taking\s+(.+))?/i.exec(text);
+    match = /^\s*(?:async\s+)?function\s+([A-Za-z_]\w*)(?:<[^>]+>)?(?:\s+taking\s+(.+))?/i.exec(text);
     if (match) {
       add(match[1], line, text.indexOf(match[1]));
       if (match[2]) {
         const parameterStart = text.indexOf(match[2]);
-        for (const parameter of match[2].split(/\s+and\s+/i)) {
-          const name = parameter.replace(/\s+as\s+\w+$/i, "").trim();
+        const parameters = match[2].replace(/\s+returning\s+.+$/i, "");
+        for (const parameter of parameters.split(/\s+and\s+/i)) {
+          const name = parameter.replace(/\s+as\s+.+$/i, "").trim();
           if (/^[A-Za-z_]\w*$/.test(name)) {
             add(name, line, text.indexOf(name, parameterStart));
           }
@@ -77,8 +95,14 @@ function provideCompletionItems(document, position) {
     item.detail = "Zelix game API (Raylib)";
     items.push(item);
   }
+  for (const name of COLLECTION_FUNCTIONS) {
+    const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Function);
+    item.insertText = name;
+    item.detail = "Zelix collection or concurrency API";
+    items.push(item);
+  }
   const text = document.lineAt(position.line).text.slice(0, position.character);
-  const functionPattern = /^\s*function\s+([A-Za-z_]\w*)(?:\s+taking\s+(.+))?/i;
+  const functionPattern = /^\s*(?:async\s+)?function\s+([A-Za-z_]\w*)(?:<[^>]+>)?(?:\s+taking\s+(.+))?/i;
   const functionNames = new Set();
   for (let line = 0; line < document.lineCount; line += 1) {
     const sourceLine = document.lineAt(line).text;
@@ -91,7 +115,8 @@ function provideCompletionItems(document, position) {
       functionNames.add(fn[1].toLowerCase());
       const signature = new vscode.CompletionItem(fn[1], vscode.CompletionItemKind.Function);
       const parameters = fn[2]
-        ? fn[2].split(/\s+and\s+/i).map((part) => part.replace(/\s+as\s+\w+$/i, "").trim())
+        ? fn[2].replace(/\s+returning\s+.+$/i, "")
+          .split(/\s+and\s+/i).map((part) => part.replace(/\s+as\s+.+$/i, "").trim())
         : [];
       signature.detail = parameters.length ? `(${parameters.join(", ")})` : "()";
       signature.insertText = parameters.length
@@ -242,7 +267,12 @@ function activate(context) {
       let errorOutput = "";
       const child = spawn(
         invocation.executable,
-        [...invocation.prefix, "--check"],
+        [
+          ...invocation.prefix,
+          "--check",
+          "--asset-root",
+          path.dirname(document.uri.fsPath),
+        ],
         { cwd: root, windowsHide: true },
       );
       entry.child = child;

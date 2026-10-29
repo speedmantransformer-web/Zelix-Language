@@ -1,0 +1,59 @@
+# Generic functions preserve the type inferred from their arguments.
+function first<T> taking items as list<T> returning T
+    return get with items and 0
+end function
+
+# Concurrent functions declare every parameter and their result type.
+async function produce taking output as channel<number> returning void
+    repeat with value from 4 to 6
+        await sleep with 0.001
+        await send with output and value
+    end loop
+    call close_channel with output
+end function
+
+function double taking value as number returning number
+    return value times 2
+end function
+
+async function delayed_value returning number
+    await sleep with 0.001
+    return 9
+end function
+
+create direct_task as delayed_value
+create direct_result as await direct_task
+display direct_result
+
+create item_ids as list<number> with list with 10 and 20
+call append with item_ids and 30
+call insert with item_ids and 1 and 15
+call remove with item_ids and 0
+display text First item ID: end text
+display first with item_ids
+
+create visited as set<number> with set with 1 and 1
+call add_to_set with visited and 2
+display length with visited
+
+create inventory as map<text, number> with map with text iron end text and 3
+call put with inventory and text iron end text and 8
+display get with inventory and text iron end text
+
+create pair as tuple<number, text> with tuple with 12 and text health end text
+display get with pair and 1
+
+create messages as channel<number> with channel with 2
+create producer_task as spawn produce with messages
+create first_message as await receive with messages
+create second_message as await receive with messages
+create third_message as await receive with messages
+await producer_task
+display first_message
+display second_message
+display third_message
+
+# Explicit threads run synchronous, isolated functions.
+create worker as spawn_thread with double and 21
+create doubled as await worker
+display doubled

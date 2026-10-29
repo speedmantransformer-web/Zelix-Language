@@ -1,8 +1,8 @@
 {
   "name": "zelix-language",
   "displayName": "Zelix Language",
-  "description": "Zelix language support and workflow: debugging, completions, diagnostics, formatting, native builds, and local packages.",
-  "version": "0.3.0",
+  "description": "Zelix language support: static types, generic collections, async concurrency, native builds, diagnostics, formatting, and debugging.",
+  "version": "0.4.0",
   "publisher": "CloudZ",
   "icon": "images/zelix-icon.png",
   "license": "MIT",
@@ -17,7 +17,12 @@
     "compiler",
     "interpreter",
     "debugger",
-    "raylib"
+    "raylib",
+    "static-types",
+    "generics",
+    "collections",
+    "concurrency",
+    "async"
   ],
   "engines": {
     "vscode": "^1.75.0"

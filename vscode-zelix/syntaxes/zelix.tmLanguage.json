@@ -20,11 +20,11 @@
     },
     {
       "name": "keyword.control.zelix",
-      "match": "\\b(if|otherwise|while|repeat|end|function|return|call|use)\\b"
+      "match": "\\b(if|otherwise|while|repeat|end|function|return|call|use|async|await|spawn)\\b"
     },
     {
       "name": "storage.type.zelix",
-      "match": "\\b(create|number|text|as|becomes|taking)\\b"
+      "match": "\\b(create|number|text|boolean|void|list|map|set|tuple|channel|task|as|becomes|taking|returning)\\b"
     },
     {
       "name": "keyword.operator.word.zelix",
@@ -36,7 +36,7 @@
     },
     {
       "name": "support.function.zelix",
-      "match": "\\b(display|input|init_window|close_window|window_should_close|frame_time|set_target_fps|begin_drawing|end_drawing|clear_background|draw_rectangle|draw_circle|draw_line|draw_text|begin_3d|end_3d|draw_cube|draw_sphere|key_pressed|key_down|key_released|mouse_x|mouse_y|mouse_button_pressed|mouse_wheel|init_audio|load_sound|play_sound|unload_sound|close_audio|create_scene|activate_scene|create_object|add_object|move_object|set_object_position|draw_scene|clear_scene|create_body|physics_set_gravity|physics_update|body_set_velocity|body_apply_force|body_x|body_y|body_collides|network_start|network_send|network_receive|network_close)\\b"
+      "match": "\\b(display|input|list|map|set|tuple|empty_list|empty_map|empty_set|append|insert|add_to_set|put|get|remove|contains|length|keys|values|channel|send|receive|close_channel|sleep|spawn_thread|init_window|close_window|window_should_close|frame_time|set_target_fps|begin_drawing|end_drawing|clear_background|draw_rectangle|draw_circle|draw_line|draw_text|begin_3d|end_3d|draw_cube|draw_sphere|key_pressed|key_down|key_released|mouse_x|mouse_y|mouse_button_pressed|mouse_wheel|init_audio|load_sound|play_sound|unload_sound|close_audio|create_scene|activate_scene|create_object|add_object|move_object|set_object_position|draw_scene|clear_scene|create_body|physics_set_gravity|physics_update|body_set_velocity|body_apply_force|body_x|body_y|body_collides|network_start|network_send|network_receive|network_close)\\b"
     },
     {
       "name": "constant.numeric.zelix",
