@@ -1,12 +1,13 @@
 # Changelog
 
-## 0.4.0
+## 0.4.1
 
 - Added static checking for annotations, generic function calls, collection types, tasks, and channels.
 - Added generic lists, maps, sets, and tuples, with collection operations and bounds checking.
 - Added async functions, task spawning, `await`, channels, `sleep`, and worker-thread functions.
 - Updated completion, syntax highlighting, snippets, and setup documentation for the new language features.
 - Added a detailed runnable concurrency and collections example.
+- Updated to Zelix CLI 0.3.1, including a native channel-close code generation fix.
 
 ## 0.3.0
 

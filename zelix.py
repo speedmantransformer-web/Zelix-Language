@@ -26,7 +26,7 @@ from syntax import (
 )
 from typesys import TypeChecker, TypeCheckError
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
 class ZelixError(Exception):
     pass

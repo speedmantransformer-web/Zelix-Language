@@ -205,6 +205,12 @@ class ZelixTests(unittest.TestCase):
             "function double taking value as number returning number\n"
             "    return value times 2\n"
             "end function\n"
+            "async function close_channel_task taking output as channel<number> returning void\n"
+            "    call close_channel with output\n"
+            "end function\n"
+            "create messages as channel<number> with channel with 1\n"
+            "create close_task as spawn close_channel_task with messages\n"
+            "await close_task\n"
             "create task as spawn pause\n"
             "await task\n"
             "create worker as spawn_thread with double and 21\n"
@@ -217,6 +223,7 @@ class ZelixTests(unittest.TestCase):
         self.assertIn("nanosleep", generated)
         self.assertIn("pthread_create", generated)
         self.assertIn("z_task_cleanup();", generated)
+        self.assertIn("z_channel_close(z_get(v_output, init_v_output, 8), 8)", generated)
 
     @unittest.skipUnless(
         shutil.which("cc") or shutil.which("gcc") or shutil.which("clang") or shutil.which("cl"),
@@ -602,7 +609,7 @@ class ZelixTests(unittest.TestCase):
 
         with contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(main(["--version"]), 0)
-        self.assertIn("Zelix 0.3.0", output.getvalue())
+        self.assertIn("Zelix 0.3.1", output.getvalue())
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "project"
@@ -845,7 +852,7 @@ class ZelixTests(unittest.TestCase):
         manifest = json.loads((root / "vscode-zelix" / "package.json").read_text(encoding="utf-8"))
         contributes = manifest["contributes"]
         self.assertIn('"debug_server"', package)
-        self.assertEqual(manifest["version"], "0.4.0")
+        self.assertEqual(manifest["version"], "0.4.1")
         self.assertEqual(manifest["icon"], "images/zelix-icon.png")
         self.assertEqual(contributes["debuggers"][0]["type"], "zelix")
         self.assertIn("zelix.debugCurrentFile", {

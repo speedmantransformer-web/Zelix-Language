@@ -2,7 +2,7 @@
   "name": "zelix-language",
   "displayName": "Zelix Language",
   "description": "Zelix language support: static types, generic collections, async concurrency, native builds, diagnostics, formatting, and debugging.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "CloudZ",
   "icon": "images/zelix-icon.png",
   "license": "MIT",

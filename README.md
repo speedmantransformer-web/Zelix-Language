@@ -1,6 +1,6 @@
 # Zelix Programming Language
 
-**Zelix 0.3.0 (alpha)** is a keyword-driven programming language with an interpreter, an optimizing native compiler for Windows and Linux, static types, generic collections, async concurrency, Raylib game APIs, local path-based packages, and VS Code tooling. Zelix has not declared a stable 1.0 release.
+**Zelix 0.3.1 (alpha)** is a keyword-driven programming language with an interpreter, an optimizing native compiler for Windows and Linux, static types, generic collections, async concurrency, Raylib game APIs, local path-based packages, and VS Code tooling. Zelix has not declared a stable 1.0 release.
 
 The interpreter remains available for quick iteration. Native compilation lowers Zelix programs into an intermediate representation (IR), folds constant expressions and branches, then emits C for a platform-native compiler. VS Code support includes completion, validation diagnostics, formatting, go-to-definition, run/build commands, and an interpreter-backed source debugger with breakpoints, stepping, stack frames, local variables, and program output. Interactive `input` statements are not supported in a debugger session.
 
@@ -153,7 +153,7 @@ Run `zelix examples/concurrency_and_collections.zelix` for an end-to-end example
 
 ## VS Code integration
 
-The `vscode-zelix` 0.4.0 extension provides syntax highlighting, keyword/variable/function/game/collection/concurrency completions, compiler-backed error highlighting, document formatting, go-to-definition for functions, parameters, variables, and counted-loop variables, plus interpreter-backed debugging. Commands include **Zelix: Run Current File**, **Zelix: Debug Current File**, **Zelix: Compile Current File**, **Zelix: Show Optimized IR**, **Zelix: Initialize Project**, and **Zelix: Install Local Packages**, plus a status-bar Run button. Install the Zelix 0.3.0 CLI separately for execution, validation, and source debugging.
+The `vscode-zelix` 0.4.1 extension provides syntax highlighting, keyword/variable/function/game/collection/concurrency completions, compiler-backed error highlighting, document formatting, go-to-definition for functions, parameters, variables, and counted-loop variables, plus interpreter-backed debugging. Commands include **Zelix: Run Current File**, **Zelix: Debug Current File**, **Zelix: Compile Current File**, **Zelix: Show Optimized IR**, **Zelix: Initialize Project**, and **Zelix: Install Local Packages**, plus a status-bar Run button. Install the Zelix 0.3.1 CLI separately for execution, validation, and source debugging.
 
 The workspace includes run/build/IR tasks and native debug configurations. VS Code recommends the Zelix extension and the Microsoft C/C++ extension; the latter is needed to debug native builds.
 
@@ -164,7 +164,7 @@ The workspace includes run/build/IR tasks and native debug configurations. VS Co
    - **Windows:** `%USERPROFILE%\\.vscode\\extensions`
    - **macOS/Linux:** `~/.vscode/extensions`
 3. Copy the entire `vscode-zelix` folder into that extensions folder.
-4. Rename the copied folder to `zelix-language-0.4.0` if desired.
+4. Rename the copied folder to `zelix-language-0.4.1` if desired.
 5. Reopen VS Code.
 6. Open a `.zelix` file. The language mode should show **Zelix** in the status bar.
 7. If the language CLI is not beside the installed extension, set `zelix.cliPath` to the full path of `zelix.py`. Set `zelix.pythonPath` if the Python command on your system is not `python`.

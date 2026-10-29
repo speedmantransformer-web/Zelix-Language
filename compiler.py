@@ -1224,7 +1224,13 @@ class CGenerator:
                         f"(Value[]){{ {args}, z_num({expr.line}) }}, {expr.line})"
                     )
                 if expr.name == "close_channel":
-                    return f"z_channel_close({args[0]}, {expr.line})"
+                    if len(expr.args) != 1:
+                        raise CompileError(
+                            f"Line {expr.line}: close_channel expects one channel"
+                        )
+                    return (
+                        f"z_channel_close({self._expr(expr.args[0])}, {expr.line})"
+                    )
                 return (
                     f"z_collection_call({json.dumps(expr.name)}, {len(expr.args)}, "
                     f"{arguments}, {expr.line})"
