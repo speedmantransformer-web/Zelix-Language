@@ -20,8 +20,8 @@ repositories {
 dependencies {
     compileOnly 'net.minecraft:launchwrapper:1.12'
     compileOnly 'org.ow2.asm:asm-all:5.0.3'
-    testRuntimeOnly 'net.minecraft:launchwrapper:1.12'
-    testRuntimeOnly 'org.ow2.asm:asm-all:5.0.3'
+    testImplementation 'net.minecraft:launchwrapper:1.12'
+    testImplementation 'org.ow2.asm:asm-all:5.0.3'
     testImplementation 'junit:junit:4.13.2'
 }
 
