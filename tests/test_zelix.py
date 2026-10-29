@@ -258,6 +258,38 @@ class ZelixTests(unittest.TestCase):
             with self.assertRaisesRegex(ZelixError, "run 'zelix install"):
                 Interpreter().run_file(project / "src" / "main.zelix")
 
+    def test_local_package_lock_normalizes_source_line_endings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            app = workspace / "app"
+            library = workspace / "helper"
+            (app / "src").mkdir(parents=True)
+            (library / "src").mkdir(parents=True)
+            (app / "zelix.toml").write_text(
+                '[package]\nname = "app"\nversion = "0.1.0"\nentry = "src/main.zelix"\n\n'
+                '[dependencies]\nhelper = { path = "../helper" }\n',
+                encoding="utf-8",
+            )
+            library_manifest = library / "zelix.toml"
+            library_manifest.write_bytes(
+                b'[package]\nname = "helper"\nversion = "1.0.0"\nentry = "src/main.zelix"\n'
+            )
+            entry = app / "src" / "main.zelix"
+            entry.write_text("use helper\n", encoding="utf-8")
+            library_entry = library / "src" / "main.zelix"
+            library_entry.write_bytes(
+                b"function help\n    return 1\nend function\n"
+            )
+            install_project(app)
+
+            library_manifest.write_bytes(
+                library_manifest.read_bytes().replace(b"\n", b"\r\n")
+            )
+            library_entry.write_bytes(
+                library_entry.read_bytes().replace(b"\n", b"\r\n")
+            )
+            validate_file(entry)
+
     def test_local_package_lock_detects_dependency_changes(self):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)

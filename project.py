@@ -124,9 +124,10 @@ def _source_digest(project: Project) -> str:
         digest.update(path.relative_to(project.root).as_posix().encode("utf-8"))
         digest.update(b"\0")
         try:
-            digest.update(path.read_bytes())
+            content = path.read_bytes()
         except OSError as exc:
             raise ProjectError(f"Cannot read package file {path}: {exc}") from exc
+        digest.update(content.replace(b"\r\n", b"\n").replace(b"\r", b"\n"))
         digest.update(b"\0")
     return digest.hexdigest()
 

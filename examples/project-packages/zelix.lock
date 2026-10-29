@@ -2,7 +2,7 @@
   "dependencies": {
     "score-tools": {
       "path": "../score-tools",
-      "sha256": "dd7dee32484fee6cc0fdca0ee23c913153d6d197fafc13a84819ee75f331ca08",
+      "sha256": "11cc40263a4cb57c20c800cc2bee2def59d44bdcd6d5ddb05fefc17475edcd08",
       "version": "1.0.0"
     }
   },
