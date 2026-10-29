@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Zelix 0.1.0: a small line-oriented interpreter prototype."""
+"""Zelix 0.2.0: a line-oriented interpreter and native compiler."""
 
 from __future__ import annotations
 import argparse
@@ -9,12 +9,12 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from compiler import CompileError, compile_file, emit_ir_file, validate_file, validate_source
 from project import ProjectError, init_project, install_project, project_entry, resolve_project_source
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 class ZelixError(Exception):
     pass
@@ -29,6 +29,12 @@ class Function:
 class ReturnSignal(Exception):
     def __init__(self, value: Any):
         self.value = value
+
+class Debugger(Protocol):
+    def before_statement(self, line: int, env: dict[str, Any]) -> None: ...
+    def push_frame(self, name: str, env: dict[str, Any], line: int) -> None: ...
+    def pop_frame(self) -> None: ...
+    def capture_exception(self) -> None: ...
 
 def clean_line(line: str) -> str:
     # Periods are optional statement terminators. Preserve periods inside text blocks.
@@ -184,10 +190,11 @@ class ExpressionParser:
             raise ZelixError(f"Invalid operands for {op}: {a!r} and {b!r}") from exc
 
 class Interpreter:
-    def __init__(self):
+    def __init__(self, debugger: Debugger | None = None):
         self.env: dict[str, Any] = {}
         self.functions: dict[str, Function] = {}
         self.call_depth = 0
+        self.debugger = debugger
 
     def error(self, line_no: int, message: str):
         raise ZelixError(f"Line {line_no}: {message}")
@@ -238,6 +245,8 @@ class Interpreter:
         lines = source.splitlines()
         self.load_functions(lines)
         numbered = [(i+1, line) for i, line in enumerate(lines)]
+        if self.debugger:
+            self.debugger.push_frame("main", self.env, 1)
         # Top-level function definitions are skipped during execution.
         self.execute(numbered, self.env)
 
@@ -261,13 +270,21 @@ class Interpreter:
         local_env = dict(self.env)
         local_env.update(zip(fn.params, args))
         self.call_depth += 1
+        if self.debugger:
+            self.debugger.push_frame(name, local_env, fn.line)
         try:
             try:
                 self.execute(fn.body, local_env, in_function=True)
             except ReturnSignal as ret:
                 return ret.value
             return None
+        except Exception:
+            if self.debugger:
+                self.debugger.capture_exception()
+            raise
         finally:
+            if self.debugger:
+                self.debugger.pop_frame()
             self.call_depth -= 1
 
     def execute(self, lines: list[tuple[int, str]], env: dict[str, Any], in_function=False):
@@ -299,6 +316,9 @@ class Interpreter:
             if low in {"end if", "end loop", "end function"} or low == "otherwise":
                 i += 1
                 continue
+
+            if self.debugger:
+                self.debugger.before_statement(line_no, env)
 
             if low.startswith("if "):
                 end, otherwise_at = self.find_block(lines, i, "if")
@@ -344,6 +364,8 @@ class Interpreter:
                     self.error(line_no, f"Variable {name!r} already exists")
                 input_match = re.match(r"(?i)^input\s+(text|number)$", expr)
                 if input_match:
+                    if self.debugger:
+                        self.error(line_no, "Interactive input is not supported while debugging")
                     prompt = input(f"{name}: ")
                     if input_match.group(1).lower() == "number":
                         try:
@@ -474,10 +496,16 @@ def main(argv: list[str] | None = None):
     parser.add_argument("--emit-ir", action="store_true", help="Print optimized Zelix IR")
     parser.add_argument("--check", action="store_true", help="Validate source without executing or compiling")
     parser.add_argument("--debug", action="store_true", help="Build an unoptimized native executable with debug symbols")
+    parser.add_argument("--debug-server", metavar="FILE", help=argparse.SUPPRESS)
+    parser.add_argument("--debug-no-stop-on-entry", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(arguments)
     if args.version:
         print(f"Zelix {VERSION}")
         return 0
+    if args.debug_server:
+        from debug_server import run_debug_server
+
+        return run_debug_server(args.debug_server, stop_on_entry=not args.debug_no_stop_on_entry)
     try:
         if args.check:
             if not args.file:

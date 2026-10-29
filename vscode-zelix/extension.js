@@ -2,6 +2,7 @@ const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const vscode = require("vscode");
+const { ZelixDebugAdapter } = require("./debug_adapter");
 
 const KEYWORDS = [
   "create", "as", "becomes", "display", "input", "text", "number", "use", "if",
@@ -213,6 +214,14 @@ function activeProjectWorkspace() {
   return workspace;
 }
 
+function sameFilePath(left, right) {
+  const first = path.resolve(left);
+  const second = path.resolve(right);
+  return process.platform === "win32"
+    ? first.toLowerCase() === second.toLowerCase()
+    : first === second;
+}
+
 function activate(context) {
   const diagnostics = vscode.languages.createDiagnosticCollection("zelix");
   const pending = new Map();
@@ -282,6 +291,50 @@ function activate(context) {
 
   context.subscriptions.push(
     diagnostics,
+    vscode.debug.registerDebugConfigurationProvider("zelix", {
+      resolveDebugConfiguration(_folder, configuration) {
+        const editor = vscode.window.activeTextEditor;
+        const program = configuration.program
+          || (editor && editor.document.languageId === "zelix" ? editor.document.uri.fsPath : undefined);
+        if (!program) {
+          vscode.window.showErrorMessage("Open a Zelix file or set 'program' in the debug configuration.");
+          return undefined;
+        }
+        return {
+          type: "zelix",
+          request: "launch",
+          name: "Debug Zelix File",
+          stopOnEntry: true,
+          ...configuration,
+          program,
+        };
+      },
+      async resolveDebugConfigurationWithSubstitutedVariables(folder, configuration) {
+        let program = configuration.program;
+        if (!program) {
+          vscode.window.showErrorMessage("Choose a Zelix source file to debug.");
+          return undefined;
+        }
+        program = path.isAbsolute(program)
+          ? program
+          : path.resolve(folder ? folder.uri.fsPath : process.cwd(), program);
+        const editor = vscode.window.activeTextEditor;
+        if (editor && editor.document.languageId === "zelix"
+          && sameFilePath(editor.document.uri.fsPath, program)) {
+          if (!await editor.document.save()) return undefined;
+          program = editor.document.uri.fsPath;
+        }
+        return {
+          ...configuration,
+          program,
+        };
+      },
+    }),
+    vscode.debug.registerDebugAdapterDescriptorFactory("zelix", {
+      createDebugAdapterDescriptor() {
+        return new vscode.DebugAdapterInlineImplementation(new ZelixDebugAdapter(context));
+      },
+    }),
     vscode.languages.registerCompletionItemProvider("zelix", { provideCompletionItems }),
     vscode.languages.registerDefinitionProvider("zelix", { provideDefinition }),
     vscode.languages.registerDocumentFormattingEditProvider("zelix", {
@@ -306,6 +359,19 @@ function activate(context) {
       return vscode.tasks.executeTask(createDocumentTask(
         context, document, "Run current file", [document.uri.fsPath],
       ));
+    }),
+    vscode.commands.registerCommand("zelix.debugCurrentFile", async () => {
+      const document = activeZelixDocument();
+      if (!document) return;
+      await document.save();
+      const workspace = vscode.workspace.getWorkspaceFolder(document.uri);
+      return vscode.debug.startDebugging(workspace, {
+        type: "zelix",
+        request: "launch",
+        name: "Debug Zelix File",
+        program: document.uri.fsPath,
+        stopOnEntry: true,
+      });
     }),
     vscode.commands.registerCommand("zelix.compileCurrentFile", async () => {
       const document = activeZelixDocument();

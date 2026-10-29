@@ -1,8 +1,8 @@
 {
   "name": "zelix-language",
   "displayName": "Zelix Language",
-  "description": "Language support and project workflow for Zelix: completions, diagnostics, formatting, navigation, native builds, and local packages.",
-  "version": "0.2.0",
+  "description": "Zelix language support and workflow: debugging, completions, diagnostics, formatting, native builds, and local packages.",
+  "version": "0.3.0",
   "publisher": "CloudZ",
   "icon": "images/zelix-icon.png",
   "license": "MIT",
@@ -16,6 +16,7 @@
     "language",
     "compiler",
     "interpreter",
+    "debugger",
     "raylib"
   ],
   "engines": {
@@ -23,7 +24,8 @@
   },
   "main": "./extension.js",
   "activationEvents": [
-    "onLanguage:zelix"
+    "onLanguage:zelix",
+    "onDebug:zelix"
   ],
   "categories": [
     "Programming Languages"
@@ -69,6 +71,11 @@
         "category": "Zelix"
       },
       {
+        "command": "zelix.debugCurrentFile",
+        "title": "Zelix: Debug Current File",
+        "category": "Zelix"
+      },
+      {
         "command": "zelix.compileCurrentFile",
         "title": "Zelix: Compile Current File",
         "category": "Zelix"
@@ -108,6 +115,41 @@
           "description": "Zelix CLI executable used when no source checkout or custom CLI script is configured."
         }
       }
-    }
+    },
+    "debuggers": [
+      {
+        "type": "zelix",
+        "label": "Zelix Debugger",
+        "languages": ["zelix"],
+        "runtime": "node",
+        "program": "./debug_adapter.js",
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Path to the .zelix file to debug.",
+                "default": "${file}"
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Pause before the first executable statement.",
+                "default": true
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "zelix",
+            "request": "launch",
+            "name": "Debug Zelix File",
+            "program": "${file}",
+            "stopOnEntry": true
+          }
+        ]
+      }
+    ]
   }
 }

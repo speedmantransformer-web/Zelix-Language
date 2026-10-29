@@ -1,9 +1,11 @@
 import contextlib
 import io
 import json
+import queue
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 import sys
@@ -17,6 +19,7 @@ from compiler import (
     validate_file, validate_source,
 )
 from project import ProjectError, init_project, install_project
+from debug_server import DebugController, DebuggerStopped
 
 class ZelixTests(unittest.TestCase):
     def test_math_words(self):
@@ -386,7 +389,7 @@ class ZelixTests(unittest.TestCase):
 
         with contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(main(["--version"]), 0)
-        self.assertIn("Zelix 0.1.0", output.getvalue())
+        self.assertIn("Zelix 0.2.0", output.getvalue())
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "project"
@@ -411,6 +414,230 @@ class ZelixTests(unittest.TestCase):
             self.assertIn("-g", command)
             self.assertIn("-O0", command)
             self.assertIn(str(generated), command)
+
+    def test_debugger_entry_step_stack_and_breakpoint(self):
+        class EventStream:
+            def __init__(self):
+                self.events = queue.Queue()
+
+            def write(self, message):
+                self.events.put(json.loads(message))
+
+            def flush(self):
+                pass
+
+        output = EventStream()
+        controller = DebugController(
+            Path("debug-test.zelix"),
+            input_stream=io.StringIO(),
+            output_stream=output,
+        )
+        main_env = {"answer": 1}
+        controller.push_frame("main", main_env, 1)
+
+        def statement(line, env, errors):
+            try:
+                controller.before_statement(line, env)
+            except DebuggerStopped as exc:
+                errors.put(exc)
+
+        errors = queue.Queue()
+        first = threading.Thread(target=statement, args=(1, main_env, errors))
+        first.start()
+        entry = output.events.get(timeout=2)
+        self.assertEqual(entry["reason"], "entry")
+        self.assertEqual(entry["stack"][0]["locals"]["answer"], 1)
+        controller.commands.put({
+            "command": "resume", "mode": "stepIn", "line": 1, "depth": 0,
+        })
+        first.join(timeout=2)
+        self.assertFalse(first.is_alive())
+
+        function_env = {"value": 42}
+        controller.push_frame("calculate", function_env, 4)
+        second = threading.Thread(target=statement, args=(4, function_env, errors))
+        second.start()
+        stepped = output.events.get(timeout=2)
+        self.assertEqual(stepped["reason"], "step")
+        self.assertEqual([frame["name"] for frame in stepped["stack"]], ["calculate", "main"])
+        self.assertEqual(stepped["stack"][0]["locals"]["value"], 42)
+        controller.commands.put({"command": "resume", "mode": "continue", "line": 4, "depth": 1})
+        second.join(timeout=2)
+        self.assertFalse(second.is_alive())
+
+        controller.commands.put({"command": "breakpoints", "lines": [8]})
+        third = threading.Thread(target=statement, args=(8, function_env, errors))
+        third.start()
+        breakpoint = output.events.get(timeout=2)
+        self.assertEqual(breakpoint["reason"], "breakpoint")
+        controller.commands.put({"command": "terminate"})
+        third.join(timeout=2)
+        self.assertFalse(third.is_alive())
+        self.assertIsInstance(errors.get_nowait(), DebuggerStopped)
+
+    def test_debug_server_runs_program_and_streams_debug_output(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "step.zelix"
+            source.write_text(
+                "function total taking amount\n"
+                "    create result as amount plus 2\n"
+                "    return result\n"
+                "end function\n"
+                "create answer as total with 40\n"
+                "display answer\n",
+                encoding="utf-8",
+            )
+            process = subprocess.Popen(
+                [sys.executable, str(root / "zelix.py"), "--debug-server", str(source)],
+                cwd=root,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+            events = queue.Queue()
+
+            def read_events():
+                for line in process.stdout:
+                    events.put(json.loads(line))
+
+            reader = threading.Thread(target=read_events, daemon=True)
+            reader.start()
+            try:
+                process.stdin.write(
+                    '{"command":"breakpoints","lines":[]}\n'
+                    '{"command":"configure"}\n'
+                )
+                process.stdin.flush()
+                entry = events.get(timeout=5)
+                self.assertEqual(entry["event"], "stopped")
+                self.assertEqual(entry["reason"], "entry")
+                self.assertEqual(entry["line"], 5)
+                process.stdin.write('{"command":"resume","mode":"stepIn","line":5,"depth":0}\n')
+                process.stdin.flush()
+                step = events.get(timeout=5)
+                self.assertEqual(step["event"], "stopped")
+                self.assertEqual(step["line"], 2)
+                self.assertEqual(step["stack"][0]["name"], "total")
+                self.assertEqual(step["stack"][0]["locals"]["amount"], 40)
+                process.stdin.write('{"command":"resume","mode":"continue","line":2,"depth":1}\n')
+                process.stdin.flush()
+                received = []
+                while True:
+                    event = events.get(timeout=5)
+                    received.append(event)
+                    if event["event"] == "terminated":
+                        break
+                output = "".join(
+                    event.get("output", "")
+                    for event in received if event["event"] == "output"
+                )
+                self.assertEqual(output, "42\n")
+                self.assertEqual(process.wait(timeout=5), 0)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+                if process.stdin:
+                    process.stdin.close()
+                if process.stdout:
+                    process.stdout.close()
+                if process.stderr:
+                    process.stderr.close()
+
+    def test_debug_server_can_skip_entry_and_stop_at_breakpoint(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "breakpoint.zelix"
+            source.write_text(
+                "create answer as 42\n"
+                "display answer\n",
+                encoding="utf-8",
+            )
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(root / "zelix.py"),
+                    "--debug-server",
+                    str(source),
+                    "--debug-no-stop-on-entry",
+                ],
+                cwd=root,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+            events = queue.Queue()
+
+            def read_events():
+                for line in process.stdout:
+                    events.put(json.loads(line))
+
+            reader = threading.Thread(target=read_events, daemon=True)
+            reader.start()
+            try:
+                process.stdin.write(
+                    '{"command":"breakpoints","lines":[2]}\n'
+                    '{"command":"configure"}\n'
+                    '{"command":"resume","mode":"continue","line":0,"depth":0}\n'
+                )
+                process.stdin.flush()
+                stopped = events.get(timeout=5)
+                self.assertEqual(stopped["event"], "stopped")
+                self.assertEqual(stopped["reason"], "breakpoint")
+                self.assertEqual(stopped["line"], 2)
+                process.stdin.write('{"command":"terminate"}\n')
+                process.stdin.flush()
+                terminated = events.get(timeout=5)
+                self.assertEqual(terminated["event"], "terminated")
+                self.assertEqual(process.wait(timeout=5), 0)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+                if process.stdin:
+                    process.stdin.close()
+                if process.stdout:
+                    process.stdout.close()
+                if process.stderr:
+                    process.stderr.close()
+
+    def test_interactive_input_is_rejected_during_debugging(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "input.zelix"
+            source.write_text("create answer as input number\n", encoding="utf-8")
+            class NoOpDebugger:
+                def before_statement(self, line, env):
+                    pass
+
+                def push_frame(self, name, env, line):
+                    pass
+
+                def pop_frame(self):
+                    pass
+
+                def capture_exception(self):
+                    pass
+
+            with self.assertRaisesRegex(ZelixError, "not supported while debugging"):
+                Interpreter(debugger=NoOpDebugger()).run_file(source)
+
+    def test_debug_server_is_in_python_package_and_marketplace_manifest(self):
+        root = Path(__file__).resolve().parents[1]
+        package = (root / "pyproject.toml").read_text(encoding="utf-8")
+        manifest = json.loads((root / "vscode-zelix" / "package.json").read_text(encoding="utf-8"))
+        contributes = manifest["contributes"]
+        self.assertIn('"debug_server"', package)
+        self.assertEqual(manifest["version"], "0.3.0")
+        self.assertEqual(manifest["icon"], "images/zelix-icon.png")
+        self.assertEqual(contributes["debuggers"][0]["type"], "zelix")
+        self.assertIn("zelix.debugCurrentFile", {
+            command["command"] for command in contributes["commands"]
+        })
 
     def test_benchmark_harness_smoke(self):
         root = Path(__file__).resolve().parents[1]

@@ -1,8 +1,8 @@
 # Zelix Programming Language
 
-**Zelix 0.1.0 (alpha)** is a keyword-driven programming language with an interpreter, an optimizing native compiler for Windows and Linux, Raylib game APIs, local path-based packages, and VS Code tooling. Zelix has not declared a stable 1.0 release.
+**Zelix 0.2.0 (alpha)** is a keyword-driven programming language with an interpreter, an optimizing native compiler for Windows and Linux, Raylib game APIs, local path-based packages, and VS Code tooling. Zelix has not declared a stable 1.0 release.
 
-The interpreter remains available for quick iteration. Native compilation lowers Zelix programs into an intermediate representation (IR), folds constant expressions and branches, then emits C for a platform-native compiler. VS Code support includes completion, validation diagnostics, formatting, go-to-definition, and run/build commands. Debugging is available for generated native programs; Zelix source-level debug mapping is not implemented yet.
+The interpreter remains available for quick iteration. Native compilation lowers Zelix programs into an intermediate representation (IR), folds constant expressions and branches, then emits C for a platform-native compiler. VS Code support includes completion, validation diagnostics, formatting, go-to-definition, run/build commands, and an interpreter-backed source debugger with breakpoints, stepping, stack frames, local variables, and program output. Interactive `input` statements are not supported in a debugger session.
 
 ## Requirements
 
@@ -114,7 +114,7 @@ Parameters are separated by the word `and`. For now, function calls support simp
 
 ## VS Code integration
 
-The `vscode-zelix` 0.2.0 extension provides syntax highlighting, keyword/variable/function/game API completions, compiler-backed error highlighting, document formatting, and go-to-definition for functions, parameters, variables, and counted-loop variables. It also adds **Zelix: Run Current File**, **Zelix: Compile Current File**, **Zelix: Show Optimized IR**, **Zelix: Initialize Project**, and **Zelix: Install Local Packages** commands, plus a status-bar Run button. Install the Zelix CLI separately for execution and validation.
+The `vscode-zelix` 0.3.0 extension provides syntax highlighting, keyword/variable/function/game API completions, compiler-backed error highlighting, document formatting, go-to-definition for functions, parameters, variables, and counted-loop variables, plus interpreter-backed debugging. Commands include **Zelix: Run Current File**, **Zelix: Debug Current File**, **Zelix: Compile Current File**, **Zelix: Show Optimized IR**, **Zelix: Initialize Project**, and **Zelix: Install Local Packages**, plus a status-bar Run button. Install the Zelix 0.2.0 CLI separately for execution, validation, and source debugging.
 
 The workspace includes run/build/IR tasks and native debug configurations. VS Code recommends the Zelix extension and the Microsoft C/C++ extension; the latter is needed to debug native builds.
 
@@ -125,13 +125,30 @@ The workspace includes run/build/IR tasks and native debug configurations. VS Co
    - **Windows:** `%USERPROFILE%\\.vscode\\extensions`
    - **macOS/Linux:** `~/.vscode/extensions`
 3. Copy the entire `vscode-zelix` folder into that extensions folder.
-4. Rename the copied folder to `zelix-language-0.2.0` if desired.
+4. Rename the copied folder to `zelix-language-0.3.0` if desired.
 5. Reopen VS Code.
 6. Open a `.zelix` file. The language mode should show **Zelix** in the status bar.
 7. If the language CLI is not beside the installed extension, set `zelix.cliPath` to the full path of `zelix.py`. Set `zelix.pythonPath` if the Python command on your system is not `python`.
 8. To show the Zelix logo beside `.zelix` files, open the Command Palette, run **Preferences: File Icon Theme**, and choose **Zelix File Icons**.
 
 The extension's Marketplace listing and manual VSIX package include setup and project-package walkthroughs in `vscode-zelix/README.md`.
+
+### Debug Zelix source
+
+1. Install the updated Zelix CLI from the repository root using `python -m pip install .`.
+2. Open a `.zelix` file, click beside a statement's line number to add a breakpoint, then run **Zelix: Debug Current File** or press F5.
+3. Use Continue, Step Over, Step Into, or Step Out in the Debug toolbar. Inspect the call stack and local variables in the Run and Debug view.
+4. To debug without pausing at the first statement, set `"stopOnEntry": false` in a `zelix` launch configuration:
+
+```json
+{
+  "type": "zelix",
+  "request": "launch",
+  "name": "Debug current Zelix file",
+  "program": "${file}",
+  "stopOnEntry": false
+}
+```
 
 ### Debug a native program
 
