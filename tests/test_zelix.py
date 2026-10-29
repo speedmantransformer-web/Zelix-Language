@@ -238,9 +238,15 @@ class ZelixTests(unittest.TestCase):
             source = Path(directory) / "concurrency.zelix"
             source.write_text(example, encoding="utf-8")
             executable, _ = compile_file(source)
-            result = subprocess.run(
-                [str(executable)], capture_output=True, text=True, check=True, timeout=15,
-            )
+            try:
+                result = subprocess.run(
+                    [str(executable)], capture_output=True, text=True, check=True, timeout=15,
+                )
+            except subprocess.CalledProcessError as exc:
+                self.fail(
+                    f"Native concurrency example exited {exc.returncode}.\n"
+                    f"stdout:\n{exc.stdout}\nstderr:\n{exc.stderr}"
+                )
         self.assertEqual(
             result.stdout.splitlines(),
             ["9", "First item ID:", "15", "2", "8", "health", "4", "5", "6", "42"],
