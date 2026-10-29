@@ -218,6 +218,8 @@ class ZelixTests(unittest.TestCase):
         )
         validate_source(source)
         generated = CGenerator(parse_source(source)).generate()
+        self.assertIn("AcquireSRWLockExclusive(&z_registry_lock)", generated)
+        self.assertIn("InterlockedExchange(&z_runtime_failed, 1)", generated)
         self.assertIn("#include <pthread.h>", generated)
         self.assertIn("z_async_sleep", generated)
         self.assertIn("nanosleep", generated)
