@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 - 2026-11-02
+
+- Added a direct LLVM IR backend for typed numeric functions, control flow, and numeric lists, with a C ABI bridge for the existing runtime and Raylib APIs.
+- Added `--backend llvm`, `--llvm-cc`, and `--emit-llvm-ir` CLI options and documented the supported voxel-world build workflow.
+- Added LLVM IR generation, runtime bridge, and Clang compilation regression coverage.
+
 ## 0.4.0 - 2026-11-01
 
 - Expanded the authenticated Minecraft ModAPI bridge with item/block registration, mod-local resource-pack assets, JEI-style lookup helpers, and a crafting-table recipe browser that transfers ingredients using vanilla inventory clicks.

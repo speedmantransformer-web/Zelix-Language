@@ -1,6 +1,6 @@
 # Zelix Programming Language
 
-**Zelix 0.4.0 (alpha)** is a keyword-driven programming language with an interpreter, an optimizing native C compiler for Windows and Linux, static types, generic collections, async concurrency, Raylib game APIs, local path-based packages, and VS Code tooling. Zelix has not declared a stable 1.0 release.
+**Zelix 0.5.0 (alpha)** is a keyword-driven programming language with an interpreter, optimizing native C and direct LLVM backends, static types, generic collections, async concurrency, Raylib game APIs, local path-based packages, and VS Code tooling. Zelix has not declared a stable 1.0 release.
 
 The interpreter remains available for quick iteration. Native compilation lowers Zelix programs into an intermediate representation (IR), propagates local constants, folds constant expressions and branches, inlines small pure functions, specializes statically numeric operations, then emits C for a platform-native compiler. VS Code support includes completion, validation diagnostics, formatting, go-to-definition, run/build commands, and an interpreter-backed source debugger with breakpoints, stepping, stack frames, local variables, and program output. Interactive `input` statements are not supported in a debugger session.
 
@@ -11,6 +11,7 @@ The interpreter remains available for quick iteration. Native compilation lowers
 - For native builds: a C compiler on `PATH`:
   - **Windows:** MSVC Build Tools (`cl`), Clang, or GCC
   - **Linux:** GCC, Clang, or `cc`
+- For the direct LLVM backend: LLVM Clang (`clang`) on `PATH`; Raylib game builds also require the Raylib 5.0+ headers and libraries.
 - For games: Raylib 5.0 or newer (development headers and libraries)
 
 ## Quick start
@@ -44,6 +45,15 @@ On Windows, the default executable has an `.exe` extension. Set a different path
 python zelix.py --compile --emit-ir examples/functions.zelix -o build/functions
 python zelix.py --emit-ir examples/functions.zelix
 ```
+
+The optional LLVM backend emits LLVM IR directly for typed numeric functions, control flow, and numeric lists. The voxel-world example uses it together with Clang and the existing Raylib runtime:
+
+```bash
+python zelix.py --compile --backend llvm examples/voxel_world.zelix -o build/voxel_world
+python zelix.py --emit-llvm-ir examples/voxel_world.zelix
+```
+
+Set `RAYLIB_INCLUDE_DIR` and `RAYLIB_LIB_DIR` when Raylib is not installed in the compiler's default search paths. `--llvm-cc` selects a non-PATH Clang executable. This backend currently supports the typed numeric/list and Raylib calls used by `voxel_world.zelix`; unsupported Zelix types or operations produce a compile diagnostic. The interpreter and existing C backend remain the defaults.
 
 On Windows, `py zelix.py examples/hello.zelix` may work if `python` is not on PATH.
 

@@ -275,6 +275,9 @@ GAME_FUNCTION_ARGUMENT_TYPES = {
     "load_boolean": {0: "text", 1: "text", 2: "boolean"},
 }
 GAME_FUNCTION_RETURN_TYPES = {
+    "window_should_close": "boolean",
+    "frame_time": "number",
+    "key_down": "boolean",
     "load_texture": "texture",
     "load_sound": "sound",
     "create_animation": "animation",

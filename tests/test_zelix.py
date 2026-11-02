@@ -17,8 +17,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from zelix import Interpreter, ExpressionParser, ZelixError
 from compiler import (
-    CGenerator, CompileError, ZelixParser, compile_file, emit_ir_file, format_ir,
-    optimize, validate_file, validate_source,
+    CGenerator, CompileError, ZelixParser, _add_runtime_helpers, compile_file,
+    emit_ir_file, emit_llvm_ir_file, format_ir, optimize, validate_file,
+    validate_source,
 )
 from project import ProjectError, init_project, install_project
 from debug_server import DebugController, DebuggerStopped
@@ -1177,6 +1178,57 @@ class ZelixTests(unittest.TestCase):
         with self.assertRaisesRegex(CompileError, "expects 6 arguments, got 3"):
             validate_source("call set_camera_3d with 0 and 0 and 0\n")
 
+    def test_llvm_backend_emits_voxel_ir_and_runtime_bridge(self):
+        root = Path(__file__).resolve().parents[1]
+        example = root / "examples" / "voxel_world.zelix"
+        llvm = emit_llvm_ir_file(example)
+        for marker in (
+            "@zelix_fn_terrain_height", "@zelix_fn_generated_block",
+            "@z_llvm_list_append", "@z_llvm_game_boolean",
+            "@z_llvm_game_number", "@z_llvm_game_void",
+            "@zelix_global_blocks", "phi i64", "fadd double",
+            "@z_llvm_number_modulo",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, llvm)
+
+        module = parse_source(example.read_text(encoding="utf-8"))
+        runtime = _add_runtime_helpers(
+            CGenerator(module, asset_root=example.parent).generate(llvm_runtime=True)
+        )
+        for marker in (
+            "void z_llvm_list_append(", "double z_llvm_game_number(",
+            "int z_llvm_game_boolean(", "int main(void)",
+            "z_game_shutdown();", "z_runtime_cleanup();",
+        ):
+            with self.subTest(runtime_marker=marker):
+                self.assertIn(marker, runtime)
+        self.assertNotIn("fn_generated_block(", runtime)
+        self.assertEqual(runtime.count("int main(void)"), 1)
+
+        clang = shutil.which("clang")
+        if not clang:
+            candidate = Path(r"C:\Program Files\LLVM\bin\clang.exe")
+            clang = str(candidate) if candidate.is_file() else None
+        if clang:
+            with tempfile.TemporaryDirectory() as directory:
+                ir_path = Path(directory) / "voxel.ll"
+                object_path = Path(directory) / (
+                    "voxel.obj" if sys.platform == "win32" else "voxel.o"
+                )
+                ir_path.write_text(llvm, encoding="utf-8")
+                result = subprocess.run(
+                    [
+                        clang, "-Wno-override-module", "-O2", "-c", "-x", "ir",
+                        str(ir_path), "-o", str(object_path),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+                self.assertTrue(object_path.is_file())
+
     def test_raylib_build_adds_headers_and_platform_libraries(self):
         source_text = "call init_window with 640 and 480 and text Game end text\n"
         with tempfile.TemporaryDirectory() as d:
@@ -1450,7 +1502,7 @@ class ZelixTests(unittest.TestCase):
 
         with contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(main(["--version"]), 0)
-        self.assertIn("Zelix 0.4.0", output.getvalue())
+        self.assertIn("Zelix 0.5.0", output.getvalue())
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "project"
@@ -1693,13 +1745,19 @@ class ZelixTests(unittest.TestCase):
         manifest = json.loads((root / "vscode-zelix" / "package.json").read_text(encoding="utf-8"))
         contributes = manifest["contributes"]
         self.assertIn('"debug_server"', package)
-        self.assertEqual(manifest["version"], "0.5.0")
+        self.assertEqual(manifest["version"], "0.6.0")
         self.assertEqual(manifest["icon"], "images/zelix-icon.png")
+        self.assertEqual(
+            contributes["configuration"]["properties"]["zelix.backend"]["enum"],
+            ["c", "llvm"],
+        )
         self.assertEqual(contributes["debuggers"][0]["type"], "zelix")
         self.assertIn("zelix.debugCurrentFile", {
             command["command"] for command in contributes["commands"]
         })
         extension_source = (root / "vscode-zelix" / "extension.js").read_text(encoding="utf-8")
+        self.assertIn('get("backend", "c")', extension_source)
+        self.assertIn('"--backend", backend', extension_source)
         for feature in (
             "draw_sprite", "create_animation", "set_camera_2d", "mouse_world_x",
             "create_combatant", "apply_status_effect", "create_entity",

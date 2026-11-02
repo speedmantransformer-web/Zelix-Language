@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0
+
+- Added the `zelix.backend` setting to compile the active file with the C or LLVM backend.
+- Documented LLVM requirements and the currently supported voxel-world subset.
+- Updated the required Zelix CLI version to 0.5.0.
+
 ## 0.5.0
 
 - Added completion and snippets for the expanded Raylib game APIs, including 3D voxel worlds, ECS physics, combat, pathfinding, particles, game UI, and save/load.

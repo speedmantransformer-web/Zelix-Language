@@ -820,13 +820,15 @@ class CGenerator:
         self.loop_id = 0
         self.has_game_api = _uses_game_api(module)
         self.asset_root = (asset_root or Path.cwd()).resolve()
+        self.llvm_runtime = False
 
-    def generate(self) -> str:
+    def generate(self, llvm_runtime: bool = False) -> str:
+        self.llvm_runtime = llvm_runtime
         self.lines = [
             "#define _POSIX_C_SOURCE 199309L",
             "#include <ctype.h>", "#include <errno.h>", "#include <math.h>", "#include <stdbool.h>",
             "#include <stdio.h>", "#include <stdlib.h>", "#include <string.h>",
-            "#include <stdint.h>", "#ifndef _WIN32", "#include <stdatomic.h>", "#endif",
+            "#include <stdint.h>", "#include <limits.h>", "#ifndef _WIN32", "#include <stdatomic.h>", "#endif",
             "#include <time.h>",
             "#ifdef _WIN32", "#include <windows.h>",
             "typedef CRITICAL_SECTION ZMutex; typedef CONDITION_VARIABLE ZCondition;",
@@ -1109,39 +1111,145 @@ class CGenerator:
             self.lines.append(f"#define Z_ASSET_ROOT {json.dumps(asset_root, ensure_ascii=True)}")
             self.lines.extend(GAME_RUNTIME_C.strip().splitlines())
             self.lines.append("")
-        for name in self.global_names:
-            ident = self._ident(name)
-            self._emit(f"static Value g_{ident} = {{ Z_NONE, 0, NULL }};")
-            self._emit(f"static bool init_g_{ident} = false;")
-        if self.global_names:
-            self._emit("")
-        for function in self.module.functions:
-            args = ", ".join(f"Value a{index}" for index in range(len(function.params))) or "void"
-            self._emit(f"static Value fn_{self._ident(function.name)}({args});")
+        if not self.llvm_runtime:
+            for name in self.global_names:
+                ident = self._ident(name)
+                self._emit(f"static Value g_{ident} = {{ Z_NONE, 0, NULL }};")
+                self._emit(f"static bool init_g_{ident} = false;")
+            if self.global_names:
+                self._emit("")
+        if self.llvm_runtime:
+            self._emit_llvm_runtime_exports()
+        else:
+            for function in self.module.functions:
+                args = ", ".join(f"Value a{index}" for index in range(len(function.params))) or "void"
+                self._emit(f"static Value fn_{self._ident(function.name)}({args});")
+                self._emit(
+                    f"static Value z_task_fn_{self._ident(function.name)}(Value *args, int argc);"
+                )
+            if self.module.functions:
+                self._emit("")
+            for function in self.module.functions:
+                self._emit_function(function)
+            for function in self.module.functions:
+                self._emit_task_wrapper(function)
+            self._emit("int main(void) {")
+            self.indent = 1
+            self._emit("atexit(z_runtime_cleanup);")
+            if self.has_game_api:
+                self._emit("atexit(z_game_shutdown);")
+            self.current_vars = {
+                name: f"g_{self._ident(name)}" for name in self.global_names
+            }
+            self._emit_statements(self.module.body)
+            if self.has_game_api:
+                self._emit("z_game_shutdown();")
+            self._emit("return 0;")
+            self.indent = 0
+            self._emit("}")
+        return "\n".join(self.lines) + "\n"
+
+    def _emit_llvm_runtime_exports(self) -> None:
+        self._emit("void z_llvm_value_number(Value *out, double value) { *out = z_num(value); }")
+        self._emit("void z_llvm_value_boolean(Value *out, int value) { *out = z_bool(value); }")
+        self._emit("void z_llvm_value_text(Value *out, const char *value) { *out = z_str(value); }")
+        self._emit(
+            "void z_llvm_value_list(Value *out, ZCollection *collection) { "
+            "*out = z_none(); out->type = Z_LIST; out->collection = collection; }"
+        )
+        self._emit(
+            "ZCollection *z_llvm_list_new(int line) { "
+            "return z_collection_call(\"empty_list\", 0, NULL, line).collection; }"
+        )
+        self._emit(
+            "void z_llvm_list_append(ZCollection *collection, double value, int line) { "
+            "Value args[2] = { z_llvm_value_list(collection), z_num(value) }; "
+            "(void)z_collection_call(\"append\", 2, args, line); }"
+        )
+        self._emit(
+            "void z_llvm_list_insert(ZCollection *collection, double index, double value, int line) { "
+            "Value args[3] = { z_llvm_value_list(collection), z_num(index), z_num(value) }; "
+            "(void)z_collection_call(\"insert\", 3, args, line); }"
+        )
+        self._emit(
+            "void z_llvm_list_remove(ZCollection *collection, double index, int line) { "
+            "Value args[2] = { z_llvm_value_list(collection), z_num(index) }; "
+            "(void)z_collection_call(\"remove\", 2, args, line); }"
+        )
+        self._emit(
+            "double z_llvm_list_get(ZCollection *collection, double index, int line) { "
+            "Value args[2] = { z_llvm_value_list(collection), z_num(index) }; "
+            "return z_number(z_collection_call(\"get\", 2, args, line), line); }"
+        )
+        self._emit(
+            "double z_llvm_number_divide(double left, double right, int line) { "
+            "return z_binary(Z_DIV, z_num(left), z_num(right), line).number; }"
+        )
+        self._emit(
+            "double z_llvm_number_modulo(double left, double right, int line) { "
+            "return z_binary(Z_MOD, z_num(left), z_num(right), line).number; }"
+        )
+        self._emit(
+            "int64_t z_llvm_to_integer(double value, int line) { "
+            "if (!isfinite(value) || (long double)value > (long double)LLONG_MAX || "
+            "(long double)value < (long double)LLONG_MIN) "
+            "z_fail(line, \"Range bound must be a finite whole-number-compatible value\"); "
+            "return (int64_t)value; }"
+        )
+        self._emit(
+            "int64_t z_llvm_repeat_count(double value, int line) { "
+            "if (!isfinite(value) || floor(value) != value || value < 0) "
+            "z_fail(line, \"Repeat count must be a non-negative whole number\"); "
+            "return value > 1000000 ? 1000000 : (int64_t)value; }"
+        )
+        self._emit(
+            "void z_llvm_loop_guard(int64_t count, int line) { "
+            "if (count > 1000000) z_fail(line, \"Loop exceeded one million iterations\"); }"
+        )
+        self._emit(
+            "void z_llvm_require_initialized(int initialized, int line) { "
+            "if (!initialized) z_fail(line, \"Unknown variable\"); }"
+        )
+        self._emit(
+            "void z_llvm_require_uninitialized(int initialized, int line) { "
+            "if (initialized) z_fail(line, \"Variable already exists\"); }"
+        )
+        self._emit(
+            "void z_llvm_print_number(double value) { "
+            "Value item = z_num(value); z_print(item); }"
+        )
+        self._emit(
+            "void z_llvm_print_boolean(int value) { "
+            "Value item = z_bool(value); z_print(item); }"
+        )
+        self._emit("void z_llvm_print_text(const char *value) { z_print(z_str(value)); }")
+        if self.has_game_api:
             self._emit(
-                f"static Value z_task_fn_{self._ident(function.name)}(Value *args, int argc);"
+                "void z_llvm_game_void(int id, int argc, Value *args, int line) { "
+                "(void)z_game(id, argc, args, line); }"
             )
-        if self.module.functions:
-            self._emit("")
-        for function in self.module.functions:
-            self._emit_function(function)
-        for function in self.module.functions:
-            self._emit_task_wrapper(function)
+            self._emit(
+                "double z_llvm_game_number(int id, int argc, Value *args, int line) { "
+                "Value result = z_game(id, argc, args, line); "
+                "if (result.type != Z_NUMBER) z_fail(line, \"Expected a numeric game API result\"); "
+                "return result.number; }"
+            )
+            self._emit(
+                "int z_llvm_game_boolean(int id, int argc, Value *args, int line) { "
+                "Value result = z_game(id, argc, args, line); "
+                "if (result.type != Z_BOOLEAN) z_fail(line, \"Expected a boolean game API result\"); "
+                "return result.number != 0; }"
+            )
+        self._emit("extern int z_llvm_main(void);")
         self._emit("int main(void) {")
         self.indent = 1
-        self._emit("atexit(z_runtime_cleanup);")
-        if self.has_game_api:
-            self._emit("atexit(z_game_shutdown);")
-        self.current_vars = {
-            name: f"g_{self._ident(name)}" for name in self.global_names
-        }
-        self._emit_statements(self.module.body)
+        self._emit("int result = z_llvm_main();")
         if self.has_game_api:
             self._emit("z_game_shutdown();")
-        self._emit("return 0;")
+        self._emit("z_runtime_cleanup();")
+        self._emit("return result;")
         self.indent = 0
         self._emit("}")
-        return "\n".join(self.lines) + "\n"
 
     def _emit_function(self, function: FunctionIR) -> None:
         args = ", ".join(f"Value a{index}" for index in range(len(function.params))) or "void"
@@ -1497,6 +1605,8 @@ def compile_source(
     compiler: str | None = None,
     debug: bool = False,
     strict: bool = False,
+    backend: str = "c",
+    llvm_compiler: str | None = None,
 ) -> Path:
     try:
         source = resolve_project_source(source, source_path)
@@ -1510,6 +1620,18 @@ def compile_source(
     module = optimize(module, inline=not debug)
     asset_root = source_path.resolve().parent
     _validate_asset_paths(module, asset_root)
+    if backend == "llvm":
+        from llvm_backend import emit_llvm_ir
+
+        generated_ir = emit_llvm_ir(module)
+        code_generator = CGenerator(module, asset_root=asset_root)
+        runtime = _add_runtime_helpers(code_generator.generate(llvm_runtime=True))
+        return _compile_llvm_module(
+            generated_ir, runtime, source_path, output_path, llvm_compiler,
+            debug, code_generator.has_game_api,
+        )
+    if backend != "c":
+        raise CompileError(f"Unknown native backend {backend!r}; expected 'c' or 'llvm'")
     code_generator = CGenerator(module, asset_root=asset_root)
     generated = _add_runtime_helpers(code_generator.generate())
     if compiler:
@@ -1595,12 +1717,120 @@ def compile_source(
     return output
 
 
+def _find_llvm_compiler(compiler: str | None) -> str | None:
+    if compiler:
+        return shutil.which(compiler) or (compiler if Path(compiler).is_file() else None)
+    found = shutil.which("clang")
+    if found:
+        return found
+    candidates = []
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    candidates.append(Path(program_files) / "LLVM" / "bin" / "clang.exe")
+    candidates.append(Path(r"C:\Program Files\LLVM\bin\clang.exe"))
+    return next((str(path) for path in candidates if path.is_file()), None)
+
+
+def _compile_llvm_module(
+    generated_ir: str,
+    runtime_source: str,
+    source_path: Path,
+    output_path: Path | None,
+    llvm_compiler: str | None,
+    debug: bool,
+    has_game_api: bool,
+) -> Path:
+    system = platform.system()
+    if system not in {"Windows", "Linux"}:
+        raise CompileError(f"LLVM native compilation is not supported on {system}; Windows and Linux are supported")
+    clang = _find_llvm_compiler(llvm_compiler)
+    if not clang:
+        raise CompileError(
+            "No LLVM Clang compiler found. Install LLVM and ensure clang is on PATH, "
+            "or pass --llvm-cc with its executable path."
+        )
+    output = output_path or source_path.with_suffix(".exe" if system == "Windows" else "")
+    output = output.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    optimization = ["-O0", "-g"] if debug else ["-O2"]
+    raylib_include = os.environ.get("RAYLIB_INCLUDE_DIR")
+    raylib_library = os.environ.get("RAYLIB_LIB_DIR")
+
+    def run(command: list[str], stage: str) -> None:
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
+        except OSError as exc:
+            raise CompileError(f"Could not run LLVM Clang during {stage}: {exc}") from exc
+        if result.returncode:
+            diagnostics = (result.stderr or result.stdout).strip()
+            raise CompileError(
+                f"LLVM Clang failed during {stage} with exit code {result.returncode}"
+                + (f":\n{diagnostics}" if diagnostics else "")
+            )
+
+    def compile_files(ir_path: Path, runtime_path: Path, object_path: Path) -> None:
+        run(
+            [
+                clang, "-Wno-override-module", "-O0" if debug else "-O2",
+                "-c", "-x", "ir", str(ir_path), "-o", str(object_path),
+            ],
+            "LLVM IR compilation",
+        )
+        command = [
+            clang, "-std=c11", *optimization, str(runtime_path), str(object_path),
+            "-o", str(output),
+        ]
+        if has_game_api and raylib_include:
+            command.extend(["-I", raylib_include])
+        if raylib_library:
+            command.extend(["-L", raylib_library])
+        if system == "Windows" and has_game_api:
+            command.extend([
+                "-lraylib", "-lopengl32", "-lgdi32", "-lwinmm", "-lws2_32",
+            ])
+        elif system == "Linux":
+            if has_game_api:
+                command.extend([
+                    "-lraylib", "-lGL", "-lm", "-lpthread", "-ldl", "-lrt", "-lX11",
+                ])
+            else:
+                command.extend(["-lm", "-pthread"])
+        elif has_game_api:
+            command.extend(["-lraylib", "-lopengl32", "-lgdi32", "-lwinmm", "-lws2_32"])
+        run(command, "runtime compilation and linking")
+
+    if debug:
+        ir_path = output.with_name(output.name + ".zelix.ll")
+        runtime_path = output.with_name(output.name + ".zelix.runtime.c")
+        object_path = output.with_name(output.name + ".zelix.obj" if system == "Windows" else output.name + ".zelix.o")
+        try:
+            ir_path.write_text(generated_ir, encoding="utf-8")
+            runtime_path.write_text(runtime_source, encoding="utf-8")
+        except OSError as exc:
+            raise CompileError(f"Could not write LLVM debug sources: {exc}") from exc
+        compile_files(ir_path, runtime_path, object_path)
+    else:
+        try:
+            with tempfile.TemporaryDirectory(prefix="zelix-llvm-") as directory:
+                temp = Path(directory)
+                ir_path = temp / "program.ll"
+                runtime_path = temp / "runtime.c"
+                object_path = temp / ("program.obj" if system == "Windows" else "program.o")
+                ir_path.write_text(generated_ir, encoding="utf-8")
+                runtime_path.write_text(runtime_source, encoding="utf-8")
+                compile_files(ir_path, runtime_path, object_path)
+        except OSError as exc:
+            raise CompileError(f"Could not write temporary LLVM source or object: {exc}") from exc
+    return output
+
+
 def compile_file(
     source_path: Path,
     output_path: Path | None = None,
     compiler: str | None = None,
     debug: bool = False,
     strict: bool = False,
+    backend: str = "c",
+    llvm_compiler: str | None = None,
 ) -> tuple[Path, str]:
     try:
         source = source_path.read_text(encoding="utf-8")
@@ -1614,7 +1844,9 @@ def compile_file(
     _check_types(module, strict)
     module = optimize(module, inline=not debug)
     ir = format_ir(module)
-    output = compile_source(source, source_path, output_path, compiler, debug, strict)
+    output = compile_source(
+        source, source_path, output_path, compiler, debug, strict, backend, llvm_compiler,
+    )
     return output, ir
 
 
@@ -1631,6 +1863,23 @@ def emit_ir_file(source_path: Path, strict: bool = False) -> str:
     _check_types(module, strict)
     module = optimize(module)
     return format_ir(module)
+
+
+def emit_llvm_ir_file(source_path: Path, strict: bool = False) -> str:
+    try:
+        source = source_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise CompileError(f"Cannot read {source_path}: {exc}") from exc
+    try:
+        source = resolve_project_source(source, source_path)
+    except ProjectError as exc:
+        raise CompileError(str(exc)) from exc
+    module = parse_source(source)
+    _check_types(module, strict)
+    module = optimize(module)
+    from llvm_backend import emit_llvm_ir
+
+    return emit_llvm_ir(module)
 
 
 def validate_source(

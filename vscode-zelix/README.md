@@ -9,7 +9,7 @@ Zelix Language Support brings the Zelix programming language and project workflo
 - Keyword, function, variable, and game API completions.
 - Live diagnostics from the Zelix CLI as you edit.
 - Document formatting and go-to-definition for local functions, variables, parameters, and loop variables.
-- Commands and tasks to run a program, compile a native executable, inspect optimized IR, initialize a Zelix project, and lock local path dependencies.
+- Commands and tasks to run a program, compile a native executable with the C or LLVM backend, inspect optimized IR, initialize a Zelix project, and lock local path dependencies.
 - Game APIs for texture-backed sprites, 2D cameras, animation state machines, keyboard/mouse input, combat health/armor/status effects, 2D/3D ECS physics, grid-based enemy pathfinding, and particle emitters.
 - Native batched voxel rendering with `draw_voxel_world` to reduce per-face draw overhead.
 - Static type checking for annotations, generic functions, typed collections, tasks, and channels.
@@ -18,7 +18,7 @@ Zelix Language Support brings the Zelix programming language and project workflo
 - Snippets for common language constructs, 2D/3D drawing and physics, scenes, ECS, combat, pathfinding, particles, and UDP messaging.
 - A Zelix file icon theme.
 
-Native compiler commands need a C compiler. Raylib game programs additionally need Raylib 5.0+ headers and libraries.
+Native compiler commands need a C compiler. Set `zelix.backend` to `llvm` to compile the active file through LLVM; this additionally requires LLVM Clang and currently supports the typed numeric, numeric-list, and Raylib subset used by `examples/voxel_world.zelix`. The C backend remains the default. Raylib game programs require Raylib 5.0+ headers and libraries.
 
 `load_texture` and `load_sound` asset paths are resolved relative to the `.zelix` source file and checked for existence and supported formats during file validation/builds. `enable_asset_hot_reload` checks loaded textures at the start of each drawing frame. See `examples/game_sprites.zelix` for sprite-sheet animations, state transitions, camera use, and hot reload; supply the referenced sprite sheets before compiling.
 
@@ -182,6 +182,7 @@ The [concurrency and collections example](../examples/concurrency_and_collection
 | `zelix.command` | `zelix` | Installed CLI command used outside a checkout |
 | `zelix.cliPath` | empty | Optional path to `zelix.py` |
 | `zelix.pythonPath` | `python` | Python executable used to run `zelix.py` |
+| `zelix.backend` | `c` | Native backend used by **Zelix: Compile Current File** (`c` or `llvm`) |
 
 Project imports require an up-to-date `zelix.lock`. Package dependencies are local paths only; there is no remote registry or package publisher yet.
 

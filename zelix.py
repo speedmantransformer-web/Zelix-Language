@@ -19,7 +19,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from compiler import CompileError, compile_file, emit_ir_file, validate_file, validate_source
+from compiler import (
+    CompileError, compile_file, emit_ir_file, emit_llvm_ir_file, validate_file,
+    validate_source,
+)
 from game_backend import GAME_FUNCTIONS
 from project import (
     ProjectError, init_project, install_project, load_project, project_entry,
@@ -32,7 +35,7 @@ from syntax import (
 )
 from typesys import TypeChecker, TypeCheckError
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 class ZelixError(Exception):
     pass
@@ -792,6 +795,13 @@ def main(argv: list[str] | None = None):
         if command == "build":
             project_parser.add_argument("-o", "--output", help="Set the native executable path")
             project_parser.add_argument("--cc", help="Choose the C compiler executable")
+            project_parser.add_argument(
+                "--backend", choices=("c", "llvm"), default="c",
+                help="Choose the native code-generation backend",
+            )
+            project_parser.add_argument(
+                "--llvm-cc", help="Choose the LLVM Clang executable",
+            )
         options = project_parser.parse_args(arguments[1:])
         try:
             if command == "init":
@@ -822,6 +832,7 @@ def main(argv: list[str] | None = None):
                 )
                 executable, _ = compile_file(
                     project.entry, output, options.cc, strict=options.strict,
+                    backend=options.backend, llvm_compiler=options.llvm_cc,
                 )
                 print(f"Built {executable}")
                 return 0
@@ -849,7 +860,16 @@ def main(argv: list[str] | None = None):
     parser.add_argument("--compile", action="store_true", help="Compile a Zelix file to a native executable")
     parser.add_argument("-o", "--output", help="Set the native executable path")
     parser.add_argument("--cc", help="Choose the C compiler executable")
+    parser.add_argument(
+        "--backend", choices=("c", "llvm"), default="c",
+        help="Choose the native code-generation backend",
+    )
+    parser.add_argument("--llvm-cc", help="Choose the LLVM Clang executable")
     parser.add_argument("--emit-ir", action="store_true", help="Print optimized Zelix IR")
+    parser.add_argument(
+        "--emit-llvm-ir", action="store_true",
+        help="Print LLVM IR generated for the typed LLVM backend",
+    )
     parser.add_argument("--check", action="store_true", help="Validate source without executing or compiling")
     parser.add_argument("--strict", action="store_true", help="Reject unchecked dynamic types")
     parser.add_argument(
@@ -889,12 +909,18 @@ def main(argv: list[str] | None = None):
                 args.cc,
                 args.debug,
                 args.strict,
+                backend=args.backend,
+                llvm_compiler=args.llvm_cc,
             )
             if args.emit_ir:
                 print(ir)
+            if args.emit_llvm_ir:
+                print(emit_llvm_ir_file(source_path, strict=args.strict))
             print(f"Compiled to {output}")
         elif args.emit_ir:
             print(emit_ir_file(source_path, strict=args.strict))
+        elif args.emit_llvm_ir:
+            print(emit_llvm_ir_file(source_path, strict=args.strict))
         else:
             Interpreter(strict=args.strict).run_file(source_path)
         return 0

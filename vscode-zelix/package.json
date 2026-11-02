@@ -2,7 +2,7 @@
   "name": "zelix-language",
   "displayName": "Zelix Language",
   "description": "Zelix language support: static types, generic collections, async concurrency, native builds, diagnostics, formatting, and debugging.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "CloudZ",
   "icon": "images/zelix-icon.png",
   "license": "MIT",
@@ -118,6 +118,12 @@
           "type": "string",
           "default": "zelix",
           "description": "Zelix CLI executable used when no source checkout or custom CLI script is configured."
+        },
+        "zelix.backend": {
+          "type": "string",
+          "enum": ["c", "llvm"],
+          "default": "c",
+          "description": "Native backend used by Zelix: Compile Current File. LLVM currently supports the voxel-world example subset."
         }
       }
     },

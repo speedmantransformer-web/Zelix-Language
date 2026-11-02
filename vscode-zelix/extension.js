@@ -431,10 +431,11 @@ function activate(context) {
       const document = activeZelixDocument();
       if (!document) return;
       await document.save();
+      const backend = vscode.workspace.getConfiguration("zelix").get("backend", "c");
       return vscode.tasks.executeTask(createDocumentTask(
         context, document,
-        "Compile current file",
-        ["--compile", document.uri.fsPath],
+        `Compile current file (${backend})`,
+        ["--compile", "--backend", backend, document.uri.fsPath],
       ));
     }),
     vscode.commands.registerCommand("zelix.showOptimizedIR", async () => {
