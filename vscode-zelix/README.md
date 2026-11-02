@@ -10,11 +10,12 @@ Zelix Language Support brings the Zelix programming language and project workflo
 - Live diagnostics from the Zelix CLI as you edit.
 - Document formatting and go-to-definition for local functions, variables, parameters, and loop variables.
 - Commands and tasks to run a program, compile a native executable, inspect optimized IR, initialize a Zelix project, and lock local path dependencies.
-- Game APIs for texture-backed sprites, 2D cameras, animation state machines, keyboard/mouse input, project-relative asset validation, and opt-in texture hot reload.
+- Game APIs for texture-backed sprites, 2D cameras, animation state machines, keyboard/mouse input, combat health/armor/status effects, 2D/3D ECS physics, grid-based enemy pathfinding, and particle emitters.
+- Native batched voxel rendering with `draw_voxel_world` to reduce per-face draw overhead.
 - Static type checking for annotations, generic functions, typed collections, tasks, and channels.
 - Generic lists, maps, sets, and tuples, including sets of string arrays, plus collection bounds checks.
 - Async tasks, `await`, channels, `sleep`, and explicit worker-thread functions.
-- Snippets for common language constructs, 2D/3D drawing, scenes, physics, and UDP messaging.
+- Snippets for common language constructs, 2D/3D drawing and physics, scenes, ECS, combat, pathfinding, particles, and UDP messaging.
 - A Zelix file icon theme.
 
 Native compiler commands need a C compiler. Raylib game programs additionally need Raylib 5.0+ headers and libraries.
@@ -43,6 +44,8 @@ The extension uses the installed `zelix` command automatically. The CLI must be 
 4. Declare local packages in `zelix.toml`, then run **Zelix: Install Local Packages** to update `zelix.lock`.
 5. Use **Zelix: Compile Current File** when you have a native compiler installed.
 6. Use **Zelix: Debug Current File** or press F5 to set breakpoints and step through the active file.
+
+For project-wide terminal workflows, use `zelix check . [--strict]`, `zelix build .`, `zelix run .`, and `zelix test .`. Tests are `.zelix` files under `tests/`; use `call assert with condition` for assertions.
 
 The debugger pauses at the first executable statement by default. Use Continue, Step Over, Step Into, and Step Out in VS Code's Debug toolbar. Debugging uses the installed Zelix CLI or the configured source checkout, so the CLI must be updated to a version that includes debugger support. Interactive Zelix `input` statements are not supported in a debug session; run the program normally to provide console input.
 
@@ -153,7 +156,9 @@ create scores as list<number> with list with 7 and 12
 display first with scores
 ```
 
-Collections include `list`, `map`, `set`, `tuple`, `append`, `insert`, `add_to_set`, `put`, `get`, `remove`, `contains`, and `length`. Zelix CLI 0.3.2 and newer supports sets of string arrays with content-based equality, for example `set<list<text>>`. Invalid indexes fail with a Zelix error instead of accessing outside a collection.
+Collections include `list`, `map`, `set`, `tuple`, `append`, `insert`, `add_to_set`, `put`, `get`, `remove`, `contains`, and `length`. Zelix CLI 0.4.0 and newer supports sets of string arrays with content-based equality, for example `set<list<text>>`. Invalid indexes fail with a Zelix error instead of accessing outside a collection.
+
+For static numeric voxel grids, `draw_voxel_world` accepts a flat block list, its width/height/depth, and four colors for block IDs 1-4 (ID 0 is air). It traverses the grid in native code and batches visible faces in one Raylib geometry pass.
 
 Async functions, `spawn`, `await`, channels, and `sleep` support concurrent work. Use `spawn_thread with function_name and arguments` to run a synchronous function on a worker thread. Concurrent functions need explicitly typed safe parameters and cannot access mutable globals or invoke Raylib APIs. The interpreter schedules async functions cooperatively; native programs implement spawned tasks using OS threads.
 

@@ -1,0 +1,52 @@
+create hero as create_combatant with 100 and 5
+create training_dummy as create_combatant with 80 and 2
+
+call init_window with 720 and 420 and text Zelix Combat Demo end text
+call set_target_fps with 60
+
+while not window_should_close
+    create delta as frame_time
+    call update_status_effects with hero and delta
+    call update_status_effects with training_dummy and delta
+    create hero_health as combatant_health with hero
+    create hero_bar_width as hero_health times 3
+    create dummy_health as combatant_health with training_dummy
+    create dummy_bar_width as dummy_health times 3
+
+    if key_pressed with text space end text
+        call apply_damage with training_dummy and 18
+    end if
+    if key_pressed with text p end text
+        call apply_status_effect with training_dummy and text poison end text and 4 and 3
+    end if
+    if key_pressed with text h end text
+        call heal_combatant with hero and 20
+    end if
+    if key_pressed with text r end text
+        call apply_status_effect with hero and text regeneration end text and 3 and 5
+    end if
+
+    call begin_drawing
+    call clear_background with text raywhite end text
+    call draw_text with text Space: hit dummy - armor reduces hits end text and 24 and 24 and 20 and text darkgray end text
+    call draw_text with text P: poison dummy; H: heal hero; R: regenerate hero end text and 24 and 54 and 20 and text darkgray end text
+    call draw_text with text Hero health end text and 24 and 116 and 20 and text blue end text
+    call draw_rectangle with 24 and 146 and hero_bar_width and 24 and text green end text
+    call draw_text with text Dummy health end text and 24 and 194 and 20 and text red end text
+    call draw_rectangle with 24 and 224 and dummy_bar_width and 24 and text orange end text
+    if has_status_effect with training_dummy and text poison end text
+        call draw_text with text Dummy poisoned end text and 24 and 272 and 20 and text orange end text
+    otherwise
+        call draw_text with text Dummy has no poison end text and 24 and 272 and 20 and text darkgray end text
+    end if
+    if is_combatant_alive with training_dummy
+        call draw_text with text Dummy alive end text and 24 and 302 and 20 and text green end text
+    otherwise
+        call draw_text with text Dummy defeated end text and 24 and 302 and 20 and text red end text
+    end if
+    call end_drawing
+end loop
+
+call close_window
+call destroy_combatant with hero
+call destroy_combatant with training_dummy

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+- Added completion and snippets for the expanded Raylib game APIs, including 3D voxel worlds, ECS physics, combat, pathfinding, particles, game UI, and save/load.
+- Added ModAPI registration, item/recipe lookup, and recipe-browser examples and snippets.
+- Updated the required Zelix CLI version to 0.4.0.
+
 ## 0.4.2
 
 - Added `string` type highlighting and completion.

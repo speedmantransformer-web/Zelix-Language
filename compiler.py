@@ -23,7 +23,7 @@ from syntax import (
     Input, Lexer, Literal, ModuleIR, RangeLoop, Repeat, Return, Spawn, Stmt, Unary,
     Variable, While, parse_source,
 )
-from typesys import TypeCheckError, TypeChecker, parse_type
+from typesys import Type, TypeCheckError, TypeChecker, parse_type
 
 
 class CompileError(Exception):
@@ -148,7 +148,10 @@ class ZelixParser:
         "list", "map", "set", "tuple", "empty_list", "empty_map", "empty_set",
         "append", "insert", "add_to_set", "put", "get", "remove", "contains",
         "length", "keys", "values", "channel", "send", "receive", "close_channel",
-        "sleep", "spawn_thread",
+        "sleep", "spawn_thread", "assert", "modapi_items", "modapi_recipes",
+        "modapi_recipes_for", "modapi_item_id", "getitembyid", "getidforitem",
+        "getrecipe", "getrecipesforid", "modapi_register_item",
+        "modapi_register_block", "modapi_recipe_gui",
     }
 
     def __init__(self, source: str):
@@ -390,6 +393,10 @@ class _StatementParser:
             return self._call(call_match.group(1), call_match.group(2) or "", line)
         name = source.strip().lower()
         if name in GAME_FUNCTIONS and GAME_FUNCTIONS[name] == 0:
+            return self._call(name, "", line)
+        if name in {
+            "modapi_items", "modapi_recipes", "modapi_recipe_gui",
+        }:
             return self._call(name, "", line)
         callable_names = self.functions | {
             name for name, arity in GAME_FUNCTIONS.items() if arity == 0
@@ -656,34 +663,82 @@ def _fold(expr: Expr) -> Expr:
 
 def _optimize_statements(statements: list[Stmt]) -> list[Stmt]:
     result = []
+    constants: dict[str, Literal] = {}
     for statement in statements:
         if isinstance(statement, (Create, Assign, Display, Return)):
-            statement.value = _fold(statement.value)
+            statement.value = _fold(_substitute_constants(statement.value, constants))
+            if isinstance(statement, (Create, Assign)):
+                if isinstance(statement.value, Literal):
+                    constants[statement.name] = copy.deepcopy(statement.value)
+                else:
+                    constants.pop(statement.name, None)
+            if _expression_has_effects(statement.value):
+                constants.clear()
         elif isinstance(statement, CallStatement):
-            statement.call = _fold(statement.call)
+            statement.call = _fold(_substitute_constants(statement.call, constants))
+            constants.clear()
         elif isinstance(statement, If):
-            statement.condition = _fold(statement.condition)
+            statement.condition = _fold(_substitute_constants(statement.condition, constants))
             statement.body = _optimize_statements(statement.body)
             statement.otherwise = _optimize_statements(statement.otherwise)
             if isinstance(statement.condition, Literal):
                 result.extend(statement.body if bool(statement.condition.value) else statement.otherwise)
+                constants.clear()
                 continue
+            constants.clear()
         elif isinstance(statement, While):
-            statement.condition = _fold(statement.condition)
+            statement.condition = _fold(_substitute_constants(statement.condition, constants))
             statement.body = _optimize_statements(statement.body)
             if isinstance(statement.condition, Literal) and not bool(statement.condition.value):
                 continue
+            constants.clear()
         elif isinstance(statement, Repeat):
-            statement.count = _fold(statement.count)
+            statement.count = _fold(_substitute_constants(statement.count, constants))
             statement.body = _optimize_statements(statement.body)
             if isinstance(statement.count, Literal) and statement.count.value == 0:
                 continue
+            constants.clear()
         elif isinstance(statement, RangeLoop):
-            statement.start = _fold(statement.start)
-            statement.end = _fold(statement.end)
+            statement.start = _fold(_substitute_constants(statement.start, constants))
+            statement.end = _fold(_substitute_constants(statement.end, constants))
             statement.body = _optimize_statements(statement.body)
+            constants.clear()
         result.append(statement)
     return result
+
+
+def _substitute_constants(expression: Expr, constants: dict[str, Literal]) -> Expr:
+    if isinstance(expression, Variable):
+        value = constants.get(expression.name)
+        if value is not None:
+            return Literal(expression.line, copy.deepcopy(value.value))
+    elif isinstance(expression, Unary):
+        expression.value = _substitute_constants(expression.value, constants)
+    elif isinstance(expression, Binary):
+        expression.left = _substitute_constants(expression.left, constants)
+        expression.right = _substitute_constants(expression.right, constants)
+    elif isinstance(expression, Call):
+        expression.args = [
+            _substitute_constants(argument, constants) for argument in expression.args
+        ]
+    elif isinstance(expression, Await):
+        expression.value = _substitute_constants(expression.value, constants)
+    elif isinstance(expression, Spawn):
+        expression.call = _substitute_constants(expression.call, constants)
+    return expression
+
+
+def _expression_has_effects(expression: Expr) -> bool:
+    if isinstance(expression, (Call, Await, Spawn, Input)):
+        return True
+    if isinstance(expression, Unary):
+        return _expression_has_effects(expression.value)
+    if isinstance(expression, Binary):
+        return (
+            _expression_has_effects(expression.left)
+            or _expression_has_effects(expression.right)
+        )
+    return False
 
 
 def format_ir(module: ModuleIR) -> str:
@@ -755,6 +810,8 @@ class CGenerator:
 
     def __init__(self, module: ModuleIR, asset_root: Path | None = None):
         self.module = module
+        self.type_checker = TypeChecker(module)
+        self.type_checker.check()
         self.lines: list[str] = []
         self.indent = 0
         self.global_names = sorted(_defined_names(module.body))
@@ -1073,6 +1130,8 @@ class CGenerator:
         self._emit("int main(void) {")
         self.indent = 1
         self._emit("atexit(z_runtime_cleanup);")
+        if self.has_game_api:
+            self._emit("atexit(z_game_shutdown);")
         self.current_vars = {
             name: f"g_{self._ident(name)}" for name in self.global_names
         }
@@ -1198,6 +1257,22 @@ class CGenerator:
             if expr.op == "not":
                 return f"z_bool(!z_truth({self._expr(expr.value)}))"
         if isinstance(expr, Binary):
+            left_type = self.type_checker.expression_types.get(id(expr.left))
+            right_type = self.type_checker.expression_types.get(id(expr.right))
+            if left_type == right_type == Type("number") and expr.op in {
+                "add", "sub", "mul", "eq", "ne", "gt", "lt", "gte", "lte",
+            }:
+                operators = {
+                    "add": "+", "sub": "-", "mul": "*", "eq": "==",
+                    "ne": "!=", "gt": ">", "lt": "<", "gte": ">=", "lte": "<=",
+                }
+                result = (
+                    f"({self._numeric_expr(expr.left)} {operators[expr.op]} "
+                    f"{self._numeric_expr(expr.right)})"
+                )
+                return f"z_bool({result})" if expr.op in {
+                    "eq", "ne", "gt", "lt", "gte", "lte",
+                } else f"z_num({result})"
             return (
                 f"z_binary({self.OPS[expr.op]}, {self._expr(expr.left)}, "
                 f"{self._expr(expr.right)}, {expr.line})"
@@ -1225,6 +1300,19 @@ class CGenerator:
             if expr.name in ZelixParser.BUILTIN_FUNCTIONS:
                 args = ", ".join(self._expr(argument) for argument in expr.args)
                 arguments = f"(Value[]){{ {args} }}" if args else "NULL"
+                if expr.name == "assert":
+                    if len(expr.args) != 1:
+                        raise CompileError(f"Line {expr.line}: assert expects one boolean condition")
+                    return f"z_assert({args}, {expr.line})"
+                if expr.name in {
+                    "modapi_items", "modapi_recipes", "modapi_recipes_for", "modapi_item_id",
+                    "getitembyid", "getidforitem", "getrecipe", "getrecipesforid",
+                    "modapi_register_item", "modapi_register_block", "modapi_recipe_gui",
+                }:
+                    message = json.dumps(
+                        f"{expr.name} requires the Zelix Minecraft loader"
+                    )
+                    return f"(z_fail({expr.line}, {message}), z_none())"
                 if expr.name == "channel":
                     if len(expr.args) != 1:
                         raise CompileError(f"Line {expr.line}: channel expects a capacity")
@@ -1281,6 +1369,22 @@ class CGenerator:
                 f"{len(expr.call.args)}, {arguments}, {expr.line})"
             )
         raise CompileError(f"Line {expr.line}: Unsupported expression")
+
+    def _numeric_expr(self, expr: Expr) -> str:
+        if isinstance(expr, Literal) and isinstance(expr.value, (int, float)) and not isinstance(expr.value, bool):
+            return repr(float(expr.value))
+        if isinstance(expr, Variable):
+            slot, initialized = self._slot(expr.name, expr.line)
+            return f"z_get({slot}, {initialized}, {expr.line}).number"
+        if (
+            isinstance(expr, Binary)
+            and expr.op in {"add", "sub", "mul"}
+            and self.type_checker.expression_types.get(id(expr.left)) == Type("number")
+            and self.type_checker.expression_types.get(id(expr.right)) == Type("number")
+        ):
+            operator = {"add": "+", "sub": "-", "mul": "*"}[expr.op]
+            return f"({self._numeric_expr(expr.left)} {operator} {self._numeric_expr(expr.right)})"
+        return f"({self._expr(expr)}).number"
 
     def _slot(self, name: str, line: int) -> tuple[str, str]:
         if name not in self.current_vars:
@@ -1378,6 +1482,10 @@ def _add_runtime_helpers(c_source: str) -> str:
         "    if (n < 0 || floor(n) != n) z_fail(line, \"Repeat count must be a non-negative whole number\");\n"
         "    return n > 1000000 ? 1000000 : (long long)n;\n"
         "}\n"
+        "static Value z_assert(Value value, int line) {\n"
+        "    if (value.type != Z_BOOLEAN || !value.number) z_fail(line, \"Assertion failed\");\n"
+        "    return z_none();\n"
+        "}\n"
     )
     return c_source.replace(marker, helper + marker, 1)
 
@@ -1388,6 +1496,7 @@ def compile_source(
     output_path: Path | None = None,
     compiler: str | None = None,
     debug: bool = False,
+    strict: bool = False,
 ) -> Path:
     try:
         source = resolve_project_source(source, source_path)
@@ -1397,7 +1506,7 @@ def compile_source(
     if system not in {"Windows", "Linux"}:
         raise CompileError(f"Native compilation is not supported on {system}; Windows and Linux are supported")
     module = parse_source(source)
-    _check_types(module)
+    _check_types(module, strict)
     module = optimize(module, inline=not debug)
     asset_root = source_path.resolve().parent
     _validate_asset_paths(module, asset_root)
@@ -1491,6 +1600,7 @@ def compile_file(
     output_path: Path | None = None,
     compiler: str | None = None,
     debug: bool = False,
+    strict: bool = False,
 ) -> tuple[Path, str]:
     try:
         source = source_path.read_text(encoding="utf-8")
@@ -1501,14 +1611,14 @@ def compile_file(
     except ProjectError as exc:
         raise CompileError(str(exc)) from exc
     module = parse_source(source)
-    _check_types(module)
+    _check_types(module, strict)
     module = optimize(module, inline=not debug)
     ir = format_ir(module)
-    output = compile_source(source, source_path, output_path, compiler, debug)
+    output = compile_source(source, source_path, output_path, compiler, debug, strict)
     return output, ir
 
 
-def emit_ir_file(source_path: Path) -> str:
+def emit_ir_file(source_path: Path, strict: bool = False) -> str:
     try:
         source = source_path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -1518,28 +1628,32 @@ def emit_ir_file(source_path: Path) -> str:
     except ProjectError as exc:
         raise CompileError(str(exc)) from exc
     module = parse_source(source)
-    _check_types(module)
+    _check_types(module, strict)
     module = optimize(module)
     return format_ir(module)
 
 
-def validate_source(source: str, asset_root: Path | None = None) -> None:
+def validate_source(
+    source: str, asset_root: Path | None = None, strict: bool = False,
+) -> None:
     module = parse_source(source)
-    _check_types(module)
+    _check_types(module, strict)
     module = optimize(module)
     if asset_root is not None:
         _validate_asset_paths(module, Path(asset_root).resolve())
     CGenerator(module, asset_root=asset_root).generate()
 
 
-def _check_types(module: ModuleIR) -> None:
+def _check_types(module: ModuleIR, strict: bool = False) -> None:
     try:
-        TypeChecker(module).check()
+        TypeChecker(module, strict=strict).check()
     except TypeCheckError as exc:
         raise CompileError(str(exc)) from exc
 
 
-def validate_file(source_path: Path, asset_root: Path | None = None) -> None:
+def validate_file(
+    source_path: Path, asset_root: Path | None = None, strict: bool = False,
+) -> None:
     if source_path.is_dir():
         from project import project_entry
 
@@ -1555,4 +1669,4 @@ def validate_file(source_path: Path, asset_root: Path | None = None) -> None:
         source = resolve_project_source(source, source_path)
     except ProjectError as exc:
         raise CompileError(str(exc)) from exc
-    validate_source(source, asset_root or source_path.resolve().parent)
+    validate_source(source, asset_root or source_path.resolve().parent, strict)

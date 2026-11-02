@@ -1,0 +1,27 @@
+
+function register_block_spec taking block_text as text and block_name as text and block_id as number and texture_src as text returning void
+    display text Block registration specification end text
+    display block_text
+    display block_name
+    display block_id
+    display texture_src
+
+    if block_id is less than 198 or block_id is greater than 4098
+        display text ERROR: block ID must be between 198 and 4098 inclusive end text
+    otherwise
+        display text Client registration: create a rock block, set hardness and gravel step sound, assign its unlocalized name and creative tab, then register its item and renderer end text
+        display text Server registration: create the same block during bootstrap, register it, then rebuild block-state IDs from every valid state and metadata value end text
+        display text After registration, rebuild BLOCK_STATE_IDS using (registered block ID shifted left 4) bitwise OR metadata end text
+        display text On AsyncSink load, register the block renderer again after resource reload end text
+        display text Add the block localization entry: tile.<block_name>.name = <block_text> end text
+        display text Write block/cube_all model JSON using blocks/<block_name> as the all texture end text
+        display text Write the item model JSON with parent block/<block_name> and the original third-person transform end text
+        display text Write blockstates/<block_name>.json with the normal variant pointing at model <block_name> end text
+        display text Fetch texture_src and write its bytes to textures/blocks/<block_name>.png end text
+    end if
+
+    display text Manual port required: customFunction(block) is arbitrary JavaScript and must be rewritten against a real EaglerForge bridge end text
+    display text Manual port required: ModAPI reflection, event listeners, AsyncSink, fetch, JSON serialization, and dedicated-server code generation have no Zelix runtime bindings end text
+end function
+
+call register_block_spec with text Block of netherite end text and text netheriteBlock end text and 198 and text https://assets.mcasset.cloud/1.21.3/assets/minecraft/textures/block/netherite_block.png end text

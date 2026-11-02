@@ -1,0 +1,29 @@
+create score as load_number with text profile.sav end text and text score end text and 0
+create player_name as load_text with text profile.sav end text and text player end text and text Player end text
+create sound_enabled as load_boolean with text profile.sav end text and text sound end text and true
+
+call init_window with 420 and 280 and text Zelix UI and Save Data end text
+call set_target_fps with 60
+
+while not window_should_close
+    call begin_drawing
+    call clear_background with text rayblack end text
+    call ui_panel with 24 and 24 and 372 and 232 and text Profile end text
+    call ui_label with 44 and 70 and player_name and 20 and text white end text
+    call ui_label with 44 and 104 and text Score end text and 18 and text lightgray end text
+    call ui_progress_bar with 44 and 132 and 260 and 16 and score and 100 and text skyblue end text
+
+    create save_clicked as ui_button with 44 and 172 and 140 and 36 and text Save score end text
+    if save_clicked
+        score becomes score plus 1
+        call save_number with text profile.sav end text and text score end text and score
+        call save_text with text profile.sav end text and text player end text and player_name
+        call save_boolean with text profile.sav end text and text sound end text and sound_enabled
+    end if
+
+    create sound_next as ui_checkbox with 210 and 180 and text Sound enabled end text and sound_enabled
+    sound_enabled becomes sound_next
+    call end_drawing
+end loop
+
+call close_window

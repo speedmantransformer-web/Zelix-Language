@@ -20,7 +20,7 @@ Run `zelix install [project-directory]` after changing the manifest or any depen
 
 ## Benchmarks
 
-Run `python benchmarks/run.py` to compare process-level medians for the same integer-sum workload in Python, interpreted Zelix, native Zelix (when a C compiler is available), and C (when a GCC-compatible compiler is available). Override the workload with `--iterations` (1–1,000,000) and `--repeats`; add `--json` for machine-readable output. JSON includes interpreter/compiler versions and optimization settings when available.
+Run `python benchmarks/run.py` to compare process-level medians for the same integer-sum workload in Python, interpreted Zelix, native Zelix (when a C compiler is available), C (when a GCC-compatible compiler is available), and optimized Rust (when `rustc` is available). Override the workload with `--iterations` (1–1,000,000) and `--repeats`; add `--json` for machine-readable output. JSON includes interpreter/compiler versions and optimization settings when available.
 
 These are reproducible local microbenchmarks, not universal language rankings. They include process startup, exclude compilation time, validate the computed result, and report the host/platform. Compare results only on the same machine and toolchain; use representative application workloads before making performance claims.
 

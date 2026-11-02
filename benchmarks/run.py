@@ -112,6 +112,22 @@ def main() -> int:
                 raise RuntimeError(f"Could not build C benchmark:\n{build.stderr.strip()}")
             results["C"] = measure([str(c_executable), str(args.iterations)], ROOT, expected, args.repeats)
 
+        rust_compiler = shutil.which("rustc")
+        if rust_compiler:
+            rust_executable = temp / ("sum-rust.exe" if os.name == "nt" else "sum-rust")
+            build = subprocess.run(
+                [
+                    rust_compiler, "--edition=2021", "-O",
+                    str(ROOT / "benchmarks" / "sum.rs"), "-o", str(rust_executable),
+                ],
+                cwd=ROOT, capture_output=True, text=True, check=False,
+            )
+            if build.returncode:
+                raise RuntimeError(f"Could not build Rust benchmark:\n{build.stderr.strip()}")
+            results["Rust"] = measure(
+                [str(rust_executable), str(args.iterations)], ROOT, expected, args.repeats
+            )
+
     toolchains = {
         "python": {"executable": sys.executable, "version": platform.python_version()},
     }
@@ -137,6 +153,12 @@ def main() -> int:
             "version": compiler_description(c_compiler),
             "optimization": "-O2",
         }
+    if rust_compiler:
+        toolchains["rust_compiler"] = {
+            "executable": rust_compiler,
+            "version": compiler_description(rust_compiler),
+            "optimization": "-O",
+        }
     report = {
         "workload": "sum integers from 1 through N",
         "iterations": args.iterations,
@@ -161,6 +183,8 @@ def main() -> int:
             print("Native Zelix omitted: no supported C compiler was found.")
         if "C" not in results:
             print("C baseline omitted: no GCC-compatible compiler was found.")
+        if "Rust" not in results:
+            print("Rust baseline omitted: rustc was not found.")
     return 0
 
 

@@ -1,0 +1,28 @@
+create modapi_event as input text
+create modapi_queried as false
+
+while modapi_event is not "stop"
+    if modapi_event is "tick" and not modapi_queried
+        create items as modapi_items
+        create recipes as modapi_recipes
+        create planks_id as modapi_item_id with text minecraft:planks end text
+        display length with items
+        display length with recipes
+        if planks_id is greater than or equal to 0
+            create planks_recipes as modapi_recipes_for with planks_id
+            create planks_recipe_count as length with planks_recipes
+            display planks_recipe_count
+            if planks_recipe_count is greater than 0
+                create first_recipe as get with planks_recipes and 0
+                create ingredients as get with first_recipe and text ingredients end text
+                create first_slot as get with ingredients and 0
+                create first_slot_count as length with first_slot
+                if first_slot_count is greater than 0
+                    display get with first_slot and 0
+                end if
+            end if
+        end if
+        modapi_queried becomes true
+    end if
+    modapi_event becomes input text
+end loop

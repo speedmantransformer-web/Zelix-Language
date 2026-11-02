@@ -1,8 +1,10 @@
 import contextlib
 import io
 import json
+import os
 import queue
 import shutil
+import socket
 import subprocess
 import tempfile
 import threading
@@ -188,7 +190,26 @@ class ZelixTests(unittest.TestCase):
             p.write_text(src, encoding="utf-8")
             ir = emit_ir_file(p)
         self.assertIn("%answer = create 14", ir)
-        self.assertIn("display %answer", ir)
+        self.assertIn("display 14", ir)
+
+    def test_optimizer_propagates_constants_but_tracks_reassignment(self):
+        source = (
+            "create base as 20\n"
+            "create answer as base plus 2\n"
+            "base becomes 100\n"
+            "display answer\n"
+            "display base\n"
+        )
+        optimized_ir = format_ir(optimize(parse_source(source)))
+        self.assertIn("%answer = create 22", optimized_ir)
+        self.assertIn("%base = 100", optimized_ir)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "constants.zelix"
+            path.write_text(source, encoding="utf-8")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                Interpreter().run_file(path)
+        self.assertEqual(output.getvalue().splitlines(), ["22", "100"])
 
     def test_source_validation(self):
         validate_source("create score as 10\nscore becomes score plus 1\n")
@@ -233,6 +254,215 @@ class ZelixTests(unittest.TestCase):
                 "end function\n"
                 "create task as spawn unsafe with 1\n"
             )
+
+    def test_strict_type_mode_requires_explicit_types(self):
+        validate_source(
+            "function double taking value as number returning number\n"
+            "    return value times 2\n"
+            "end function\n"
+            "create answer as double with 21\n",
+            strict=True,
+        )
+        with self.assertRaisesRegex(CompileError, "Strict mode requires a type for parameter"):
+            validate_source(
+                "function identity taking value\n"
+                "    return value\n"
+                "end function\n",
+                strict=True,
+            )
+    def test_owned_game_resources_are_typed_and_consumed(self):
+        source = (
+            "create sprite as load_texture with text sprite.png end text\n"
+            "call draw_sprite with sprite and 10 and 20\n"
+            "call unload_texture with sprite\n"
+        )
+        validate_source(source)
+        with self.assertRaisesRegex(CompileError, "was already released"):
+            validate_source(
+                source + "call texture_width with sprite\n"
+            )
+        with self.assertRaisesRegex(CompileError, "not released on this exit path"):
+            validate_source(
+                "create sprite as load_texture with text sprite.png end text\n"
+                "display 1\n"
+            )
+        with self.assertRaisesRegex(CompileError, "not released on this exit path"):
+            validate_source(
+                "function load_and_forget returning void\n"
+                "    create sprite as load_texture with text sprite.png end text\n"
+                "end function\n"
+            )
+        with self.assertRaisesRegex(CompileError, "not released on this exit path"):
+            validate_source(
+                "function maybe_exit taking should_exit as boolean returning number\n"
+                "    create sprite as load_texture with text sprite.png end text\n"
+                "    if should_exit\n"
+                "        return 1\n"
+                "    end if\n"
+                "    call unload_texture with sprite\n"
+                "    return 0\n"
+                "end function\n"
+            )
+        with self.assertRaisesRegex(CompileError, "was already released"):
+            validate_source(
+                "create sprite as load_texture with text sprite.png end text\n"
+                "call close_window\n"
+                "call texture_width with sprite\n"
+            )
+        with self.assertRaisesRegex(CompileError, "expects texture, got sound"):
+            validate_source(
+                "create effect as load_sound with text effect.wav end text\n"
+                "call draw_sprite with effect and 10 and 20\n"
+            )
+        with self.assertRaisesRegex(CompileError, "expects texture, got sound"):
+            validate_source(
+                "create effect as load_sound with text effect.wav end text\n"
+                "create animation as create_animation with effect and 32 and 32 and 4 and 8\n"
+            )
+        with self.assertRaisesRegex(CompileError, "cannot be copied by declaration"):
+            validate_source(
+                "create sprite as load_texture with text sprite.png end text\n"
+                "create second as sprite\n"
+            )
+        with self.assertRaisesRegex(CompileError, "must be bound directly"):
+            validate_source(
+                "call play_sound with load_sound with text effect.wav end text\n"
+            )
+        with self.assertRaisesRegex(CompileError, "cannot be stored in collections"):
+            validate_source(
+                "create sprite as load_texture with text sprite.png end text\n"
+                "create items as list<any> with empty_list with\n"
+                "call append with items and sprite\n"
+            )
+        with self.assertRaisesRegex(CompileError, "cannot be stored in collections"):
+            validate_source(
+                "create items as list<texture> with empty_list with\n"
+            )
+        with self.assertRaisesRegex(CompileError, "cannot be stored in channels"):
+            validate_source(
+                "create messages as channel<texture> with channel with 1\n"
+            )
+        with self.assertRaisesRegex(CompileError, "untyped or generic parameters"):
+            validate_source(
+                "function identity taking item\n"
+                "    return item\n"
+                "end function\n"
+                "create sprite as load_texture with text sprite.png end text\n"
+                "create second as identity with sprite\n"
+            )
+        validate_source(
+            "function draw_image taking item as texture returning void\n"
+            "    call draw_sprite with item and 10 and 20\n"
+            "end function\n"
+            "create sprite as load_texture with text sprite.png end text\n"
+            "call draw_image with sprite\n"
+            "call unload_texture with sprite\n"
+        )
+        with self.assertRaisesRegex(CompileError, "must be passed as a typed parameter"):
+            validate_source(
+                "create sprite as load_texture with text sprite.png end text\n"
+                "function draw_global returning void\n"
+                "    call draw_sprite with sprite and 10 and 20\n"
+                "end function\n"
+                "call unload_texture with sprite\n"
+            )
+        with self.assertRaisesRegex(CompileError, "same ownership state in both branches"):
+            validate_source(
+                "create sprite as load_texture with text sprite.png end text\n"
+                "create should_release as true\n"
+                "if should_release\n"
+                "    call unload_texture with sprite\n"
+                "otherwise\n"
+                "    display false\n"
+                "end if\n"
+            )
+        validate_source(
+            "create sprite as load_texture with text sprite.png end text\n"
+            "if true\n"
+            "    call unload_texture with sprite\n"
+            "otherwise\n"
+            "    display false\n"
+            "end if\n"
+        )
+        with self.assertRaisesRegex(CompileError, "ownership cannot change inside a loop"):
+            validate_source(
+                "create sprite as load_texture with text sprite.png end text\n"
+                "create should_release as true\n"
+                "while should_release\n"
+                "    call unload_texture with sprite\n"
+                "end loop\n"
+            )
+            with self.assertRaisesRegex(CompileError, "was already released"):
+                validate_source(
+                    "create effect as load_sound with text effect.wav end text\n"
+                    "call close_audio\n"
+                    "call play_sound with effect\n"
+                )
+            native_audio_shutdown = CGenerator(parse_source(
+                "create effect as load_sound with text effect.wav end text\n"
+                "call unload_sound with effect\n"
+            )).generate()
+            self.assertIn('if (!z_sound_loaded[handle]) z_fail(line, "Sound handle is not loaded");', native_audio_shutdown)
+        validate_source(
+            "create sprite as load_texture with text sprite.png end text\n"
+            "while false\n"
+            "    call unload_texture with sprite\n"
+            "end loop\n"
+            "call unload_texture with sprite\n"
+        )
+
+    def test_typed_numeric_codegen_uses_unboxed_arithmetic(self):
+        module = parse_source(
+            "function add taking left as number and right as number returning number\n"
+            "    return left plus right\n"
+            "end function\n"
+            "create answer as add with 20 and 22\n"
+        )
+        generated = CGenerator(module).generate()
+        self.assertIn(
+            "z_num((z_get(v_left, init_v_left, 2).number + "
+            "z_get(v_right, init_v_right, 2).number))",
+            generated,
+        )
+        self.assertNotIn("z_binary(Z_ADD", generated)
+
+    def test_assert_builtin_and_local_project_commands(self):
+        from zelix import main
+
+        generated = CGenerator(parse_source("call assert with true\n")).generate()
+        self.assertIn("z_assert(z_bool(1), 1)", generated)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "app"
+            manifest, entry = init_project(root)
+            entry.write_text("display text Application ran end text\n", encoding="utf-8")
+            test_root = root / "tests"
+            test_root.mkdir()
+            (test_root / "basic.zelix").write_text(
+                "call assert with 20 plus 22 is 42\n", encoding="utf-8",
+            )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(main(["check", str(root), "--strict"]), 0)
+                self.assertEqual(main(["run", str(root)]), 0)
+                self.assertEqual(main(["test", str(root)]), 0)
+            self.assertIn("Checked 2 Zelix source file(s)", output.getvalue())
+            self.assertIn("Application ran", output.getvalue())
+            self.assertIn("test tests/basic.zelix ... ok", output.getvalue())
+            with patch("zelix.compile_file", return_value=(root / "target" / "app", "")) as build:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(["build", str(root)]), 0)
+            self.assertEqual(build.call_args.args[0], entry)
+            suffix = ".exe" if sys.platform == "win32" else ""
+            self.assertEqual(
+                build.call_args.args[1], root / "target" / f"app{suffix}",
+            )
+            self.assertTrue(manifest.is_file())
+
+        with self.assertRaisesRegex(ZelixError, "Assertion failed"):
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "failed.zelix"
+                path.write_text("call assert with false\n", encoding="utf-8")
+                Interpreter().run_file(path)
 
     def test_concurrency_and_collection_example(self):
         root = Path(__file__).resolve().parents[1]
@@ -379,11 +609,17 @@ class ZelixTests(unittest.TestCase):
             'call close_window\n'
         )
         generated = CGenerator(ZelixParser(source).parse()).generate()
+        self.assertIn("atexit(z_game_shutdown);", generated)
         self.assertIn('#include "raylib.h"', generated)
         self.assertIn("InitWindow(", generated)
         self.assertIn("DrawRectangle(", generated)
         self.assertIn("WindowShouldClose()", generated)
         self.assertIn("z_game_shutdown();", generated)
+        self.assertLess(
+            generated.index("atexit(z_runtime_cleanup);"),
+            generated.index("atexit(z_game_shutdown);"),
+        )
+        self.assertIn("z_socket_used[i] = false;", generated)
 
     def test_raylib_audio_codegen_uses_raylib_5_0_sound_fields(self):
         source = "call init_audio\n"
@@ -437,18 +673,21 @@ class ZelixTests(unittest.TestCase):
             (root / "assets" / "hero.png").write_bytes(b"placeholder image")
             source = root / "game.zelix"
             source.write_text(
-                "create hero as load_texture with text assets/hero.png end text\n",
+                "create hero as load_texture with text assets/hero.png end text\n"
+                "call unload_texture with hero\n",
                 encoding="utf-8",
             )
             validate_file(source)
             source.write_text(
-                "create hero as load_texture with text assets/missing.png end text\n",
+                "create hero as load_texture with text assets/missing.png end text\n"
+                "call unload_texture with hero\n",
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(CompileError, "does not exist"):
                 validate_file(source)
             source.write_text(
-                "create hero as load_texture with text assets/hero.txt end text\n",
+                "create hero as load_texture with text assets/hero.txt end text\n"
+                "call unload_texture with hero\n",
                 encoding="utf-8",
             )
             (root / "assets" / "hero.txt").write_text("not an image", encoding="utf-8")
@@ -458,6 +697,485 @@ class ZelixTests(unittest.TestCase):
     def test_game_api_argument_validation(self):
         with self.assertRaisesRegex(CompileError, "Game API init_window expects 3 arguments, got 2"):
             validate_source("call init_window with 640 and 480\n")
+
+    def test_entity_component_physics_api(self):
+        source = (
+            "create player as create_entity\n"
+            "create floor as create_entity\n"
+            "call add_transform with player and 20 and 30\n"
+            "call add_transform with floor and 0 and 100\n"
+            "call add_rigidbody with player and 1\n"
+            "call add_rigidbody with floor and 0\n"
+            "call add_box_collider with player and 24 and 24 and 0.1 and 0.3\n"
+            "call add_box_collider with floor and 400 and 20 and 0 and 0.8\n"
+            "call entity_set_velocity with player and 10 and 0\n"
+            "call entity_apply_force with player and 10 and 0\n"
+            "create touching as entity_collides with player and floor\n"
+            "create x as entity_x with player\n"
+            "create y as entity_y with player\n"
+            "create vx as entity_velocity_x with player\n"
+            "create vy as entity_velocity_y with player\n"
+            "call set_entity_position with player and x and y\n"
+            "call physics_update with 0.016\n"
+            "call destroy_entity with floor\n"
+            "call destroy_entity with player\n"
+        )
+        validate_source(source)
+        generated = CGenerator(parse_source(source)).generate()
+        for api in (
+            "CREATE_ENTITY", "DESTROY_ENTITY", "ADD_TRANSFORM", "ADD_RIGIDBODY",
+            "ADD_BOX_COLLIDER", "ENTITY_SET_VELOCITY", "ENTITY_APPLY_FORCE",
+            "ENTITY_COLLIDES", "ENTITY_X", "ENTITY_VELOCITY_Y",
+        ):
+            with self.subTest(api=api):
+                self.assertIn(f"case Z_GAME_{api}", generated)
+        self.assertIn("Z_GAME_MAX_ENTITIES 512", generated)
+        self.assertIn("Z_GAME_MAX_OBJECTS; ++j", generated)
+        self.assertIn("ceilf(delta * 120.0f)", generated)
+        self.assertIn("z_game_resolve_aabb(", generated)
+        self.assertIn("sqrtf(a_friction * b_friction)", generated)
+        self.assertIn("generation != generation", generated)
+        self.assertIn("Static rigidbodies cannot be moved", generated)
+
+        with self.assertRaisesRegex(CompileError, "expects entity, got sound"):
+            validate_source(
+                "create effect as load_sound with text effect.wav end text\n"
+                "call destroy_entity with effect\n"
+                "call unload_sound with effect\n"
+            )
+        with self.assertRaisesRegex(CompileError, "expects 5 arguments, got 3"):
+            validate_source(
+                "create player as create_entity\n"
+                "call add_transform with player and 0 and 0\n"
+                "call add_box_collider with player and 10 and 10\n"
+            )
+
+    def test_3d_entity_physics_api(self):
+        source = (
+            "create crate as create_entity\n"
+            "create floor as create_entity\n"
+            "call add_transform_3d with crate and 0 and 3 and 0\n"
+            "call add_transform_3d with floor and -5 and 0 and -5\n"
+            "call add_rigidbody with crate and 2\n"
+            "call add_rigidbody with floor and 0\n"
+            "call add_box_collider_3d with crate and 1 and 1 and 1 and 0.2 and 0.4\n"
+            "call add_box_collider_3d with floor and 10 and 1 and 10 and 0 and 0.8\n"
+            "call physics_set_gravity_3d with 0 and -9.8 and 0\n"
+            "call entity_set_velocity_3d with crate and 1 and 0 and 2\n"
+            "call entity_apply_force_3d with crate and 0 and 4 and 0\n"
+            "create z as entity_z with crate\n"
+            "create vz as entity_velocity_z with crate\n"
+            "create touching as entity_collides_3d with crate and floor\n"
+            "call set_entity_position_3d with crate and 0 and 3 and z\n"
+            "call physics_update with 0.016\n"
+            "call destroy_entity with floor\n"
+            "call destroy_entity with crate\n"
+        )
+        validate_source(source)
+        generated = CGenerator(parse_source(source)).generate()
+        for api in (
+            "ADD_TRANSFORM_3D", "ENTITY_Z", "SET_ENTITY_POSITION_3D",
+            "ENTITY_VELOCITY_Z", "ENTITY_SET_VELOCITY_3D",
+            "ENTITY_APPLY_FORCE_3D", "ADD_BOX_COLLIDER_3D",
+            "ENTITY_COLLIDES_3D", "PHYSICS_SET_GRAVITY_3D",
+        ):
+            with self.subTest(api=api):
+                self.assertIn(f"case Z_GAME_{api}", generated)
+        self.assertIn("ZBoxCollider3D", generated)
+        self.assertIn("z_game_resolve_box_3d(", generated)
+        self.assertIn("float overlap[3]", generated)
+        self.assertIn("if (inverse_mass <= 0) return;", generated)
+
+        with self.assertRaisesRegex(CompileError, "expects entity, got sound"):
+            validate_source(
+                "create effect as load_sound with text effect.wav end text\n"
+                "call add_transform_3d with effect and 0 and 0 and 0\n"
+                "call unload_sound with effect\n"
+            )
+        with self.assertRaisesRegex(CompileError, "expects 6 arguments, got 5"):
+            validate_source(
+                "create crate as create_entity\n"
+                "call add_transform_3d with crate and 0 and 0 and 0\n"
+                "call add_box_collider_3d with crate and 1 and 1 and 1 and 0\n"
+            )
+
+    def test_pathfinding_and_particle_apis(self):
+        source = (
+            "create grid as create_path_grid with 8 and 8 and 32\n"
+            "call set_path_blocked with grid and 2 and 2 and true\n"
+            "create route as find_path with grid and 0 and 0 and 7 and 7\n"
+            "create route_size as path_length with route\n"
+            "create cell_x as path_x with route and 0\n"
+            "create cell_y as path_y with route and 0\n"
+            "create actor as create_entity\n"
+            "call add_transform with actor and 16 and 16\n"
+            "create arrived as follow_path with route and actor and 80 and 0.016\n"
+            "call destroy_path with route\n"
+            "call destroy_path_grid with grid\n"
+            "create sparks as create_particle_emitter with 128\n"
+            "create emitted as emit_particles with sparks and 20 and 30 and 10 and 1 and 80 and text orange end text\n"
+            "call set_particle_gravity with sparks and 100\n"
+            "call update_particle_emitter with sparks and 0.016\n"
+            "create count as particle_count with sparks\n"
+            "call draw_particle_emitter with sparks\n"
+            "call clear_particle_emitter with sparks\n"
+            "call destroy_particle_emitter with sparks\n"
+            "call destroy_entity with actor\n"
+        )
+        validate_source(source)
+        generated = CGenerator(parse_source(source)).generate()
+        for api in (
+            "CREATE_PATH_GRID", "SET_PATH_BLOCKED", "FIND_PATH",
+            "PATH_LENGTH", "PATH_X", "PATH_Y", "FOLLOW_PATH",
+            "CREATE_PARTICLE_EMITTER", "EMIT_PARTICLES",
+            "UPDATE_PARTICLE_EMITTER", "DRAW_PARTICLE_EMITTER",
+            "PARTICLE_COUNT", "CLEAR_PARTICLE_EMITTER",
+        ):
+            with self.subTest(api=api):
+                self.assertIn(f"case Z_GAME_{api}", generated)
+        self.assertIn("Z_GAME_MAX_PATH_CELLS 4096", generated)
+        self.assertIn("heuristic = (float)(abs(gx - x) + abs(gy - y))", generated)
+        self.assertIn("Path coordinates are outside the grid", generated)
+        self.assertIn("z_paths[i].active = false;", generated)
+        self.assertIn("z_game_random(&emitter->random_state)", generated)
+        self.assertIn("Particle capacity must be a whole number from 1 to 256", generated)
+
+        with self.assertRaisesRegex(CompileError, "expects path_grid, got sound"):
+            validate_source(
+                "create effect as load_sound with text effect.wav end text\n"
+                "call destroy_path_grid with effect\n"
+                "call unload_sound with effect\n"
+            )
+        with self.assertRaisesRegex(CompileError, "expects 7 arguments, got 3"):
+            validate_source(
+                "create sparks as create_particle_emitter with 8\n"
+                "call emit_particles with sparks and 0 and 0\n"
+            )
+
+    def test_game_ui_and_save_load_apis(self):
+        source = (
+            "call ui_panel with 12 and 12 and 280 and 180 and text Settings end text\n"
+            "call ui_label with 24 and 48 and text Volume end text and 18 and text white end text\n"
+            "create clicked as ui_button with 24 and 80 and 120 and 32 and text Save end text\n"
+            "create enabled as ui_checkbox with 24 and 124 and text Enabled end text and true\n"
+            "call ui_progress_bar with 24 and 160 and 200 and 12 and 3 and 5 and text lime end text\n"
+            "call save_number with text profile.sav end text and text score end text and 42\n"
+            "create score as load_number with text profile.sav end text and text score end text and 0\n"
+            "call save_text with text profile.sav end text and text player end text and text Ada\\tLovelace end text\n"
+            "create player as load_text with text profile.sav end text and text player end text and text Guest end text\n"
+            "call save_boolean with text profile.sav end text and text audio end text and true\n"
+            "create audio as load_boolean with text profile.sav end text and text audio end text and false\n"
+        )
+        validate_source(source)
+        generated = CGenerator(parse_source(source)).generate()
+        for api in (
+            "UI_PANEL", "UI_LABEL", "UI_BUTTON", "UI_CHECKBOX", "UI_PROGRESS_BAR",
+            "SAVE_NUMBER", "LOAD_NUMBER", "SAVE_TEXT", "LOAD_TEXT",
+            "SAVE_BOOLEAN", "LOAD_BOOLEAN",
+        ):
+            with self.subTest(api=api):
+                self.assertIn(f"case Z_GAME_{api}", generated)
+        self.assertIn("CheckCollisionPointRec(GetMousePosition(), bounds)", generated)
+        self.assertIn("z_game_encode_save_text", generated)
+        self.assertIn("Text save value exceeds the maximum supported size", generated)
+        self.assertIn("Malformed saved number", generated)
+        self.assertIn("Saved value has a different type", generated)
+
+        with self.assertRaisesRegex(CompileError, "expects boolean, got number"):
+            validate_source(
+                "call save_boolean with text profile.sav end text and "
+                "text audio end text and 1\n"
+            )
+        with self.assertRaisesRegex(CompileError, "expects number, got text"):
+            validate_source(
+                "call ui_progress_bar with 0 and 0 and 100 and 12 and "
+                "text full end text and 100 and text lime end text\n"
+            )
+
+    def test_modapi_read_only_item_and_recipe_queries(self):
+        source = (
+            "create items as modapi_items\n"
+            "create first as get with items and 0\n"
+            "display get with first and text registry_name end text\n"
+            "create recipes as modapi_recipes_for with 4\n"
+            "display length with recipes\n"
+            "create recipe as get with recipes and 0\n"
+            "create slots as get with recipe and text ingredients end text\n"
+            "create alternatives as get with slots and 0\n"
+            "display get with alternatives and 0\n"
+            "create item_id as modapi_item_id with text minecraft:planks end text\n"
+            "display item_id\n"
+            "create all_recipes as modapi_recipes\n"
+            "display length with all_recipes\n"
+        )
+        validate_source(source)
+        requests = []
+        fixture = {
+            "items": [{
+                "id": 1,
+                "registry_name": "minecraft:stone",
+                "unlocalized_name": "tile.stone",
+            }],
+            "recipes_for": [{
+                "result_id": 4,
+                "result_count": 1,
+                "ingredients": [[1]],
+            }],
+            "item_id": 5,
+            "recipes": [{
+                "result_id": 4,
+                "result_count": 1,
+                "ingredients": [[1]],
+            }],
+        }
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(4)
+            port = listener.getsockname()[1]
+
+            def serve_queries():
+                for _ in range(4):
+                    client, _ = listener.accept()
+                    with client:
+                        request = client.makefile("rb").readline().decode("utf-8").rstrip("\n")
+                        parts = request.split("\t")
+                        requests.append(parts)
+                        response = json.dumps(fixture[parts[1]]).encode("utf-8") + b"\n"
+                        client.sendall(response)
+
+            server = threading.Thread(target=serve_queries)
+            server.start()
+            with patch.dict(os.environ, {
+                "ZELIX_MODAPI_PORT": str(port),
+                "ZELIX_MODAPI_TOKEN": "fixture-token",
+            }):
+                output = io.StringIO()
+                with tempfile.TemporaryDirectory() as directory:
+                    script = Path(directory) / "query.zelix"
+                    script.write_text(source, encoding="utf-8")
+                    with contextlib.redirect_stdout(output):
+                        Interpreter().run_file(script)
+            server.join(timeout=3)
+            self.assertFalse(server.is_alive())
+        self.assertEqual(output.getvalue().splitlines(), [
+            "minecraft:stone", "1", "1", "5", "1",
+        ])
+        self.assertEqual([request[:2] for request in requests], [
+            ["fixture-token", "items"],
+            ["fixture-token", "recipes_for"],
+            ["fixture-token", "item_id"],
+            ["fixture-token", "recipes"],
+        ])
+        generated = CGenerator(parse_source("create items as modapi_items\n")).generate()
+        self.assertIn("modapi_items requires the Zelix Minecraft loader", generated)
+        with self.assertRaisesRegex(CompileError, "modapi_recipes_for expects one item ID"):
+            validate_source("create recipes as modapi_recipes_for with\n")
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / "outside_loader.zelix"
+            script.write_text("create items as modapi_items\n", encoding="utf-8")
+            with patch.dict(os.environ, {
+                "ZELIX_MODAPI_PORT": "",
+                "ZELIX_MODAPI_TOKEN": "",
+            }):
+                with self.assertRaisesRegex(
+                    ZelixError, "available only inside the Zelix Minecraft loader"
+                ):
+                    Interpreter().run_file(script)
+
+    def test_modapi_jei_helpers_and_registration_actions(self):
+        source = (
+            "create item as getItemById with 5\n"
+            "display get with item and text registry_name end text\n"
+            "create item_id as getIdForItem with text minecraft:planks end text\n"
+            "display item_id\n"
+            "create recipes as getRecipesForId with 5\n"
+            "display length with recipes\n"
+            "create recipe as getRecipe with 5 and 0\n"
+            "display get with recipe and text result_count end text\n"
+            "create new_item as modapi_register_item with text copper_ingot end text and 64\n"
+            "display new_item\n"
+            "create new_block as modapi_register_block with text copper_ore end text and "
+            "text rock end text and 3\n"
+            "display new_block\n"
+            "create gui_opened as modapi_recipe_gui\n"
+            "display gui_opened\n"
+        )
+        validate_source(source)
+        requests = []
+        fixture = {
+            "item_by_id": {
+                "id": 5,
+                "registry_name": "minecraft:planks",
+                "unlocalized_name": "tile.wood",
+            },
+            "item_id": 5,
+            "recipes_for": [{
+                "result_id": 5,
+                "result_count": 4,
+                "ingredients": [[1]],
+            }],
+            "recipe": {
+                "result_id": 5,
+                "result_count": 4,
+                "ingredients": [[1]],
+            },
+            "register_item": 101,
+            "register_block": 102,
+            "recipe_gui": 1,
+        }
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(8)
+            port = listener.getsockname()[1]
+
+            def serve_actions():
+                for _ in range(7):
+                    client, _ = listener.accept()
+                    with client:
+                        parts = client.makefile("rb").readline().decode("utf-8").rstrip("\n").split("\t")
+                        requests.append(parts)
+                        client.sendall(json.dumps(fixture[parts[1]]).encode("utf-8") + b"\n")
+
+            server = threading.Thread(target=serve_actions)
+            server.start()
+            with patch.dict(os.environ, {
+                "ZELIX_MODAPI_PORT": str(port),
+                "ZELIX_MODAPI_TOKEN": "fixture-token",
+                "ZELIX_MODAPI_MOD_ID": "demo_mod",
+            }):
+                output = io.StringIO()
+                with tempfile.TemporaryDirectory() as directory:
+                    script = Path(directory) / "jei_helpers.zelix"
+                    script.write_text(source, encoding="utf-8")
+                    with contextlib.redirect_stdout(output):
+                        Interpreter().run_file(script)
+            server.join(timeout=3)
+            self.assertFalse(server.is_alive())
+        self.assertEqual(output.getvalue().splitlines(), [
+            "minecraft:planks", "5", "1", "4", "101", "102", "1",
+        ])
+        self.assertEqual([request[:2] for request in requests], [
+            ["fixture-token", "item_by_id"],
+            ["fixture-token", "item_id"],
+            ["fixture-token", "recipes_for"],
+            ["fixture-token", "recipe"],
+            ["fixture-token", "register_item"],
+            ["fixture-token", "register_block"],
+            ["fixture-token", "recipe_gui"],
+        ])
+        self.assertEqual(requests[4][2:], ["demo_mod", "copper_ingot", "64"])
+        self.assertEqual(requests[5][2:], ["demo_mod", "copper_ore", "rock", "3"])
+
+    def test_combat_api_types_and_native_runtime(self):
+        source = (
+            "create hero as create_combatant with 100 and 5\n"
+            "call apply_damage with hero and 20\n"
+            "call heal_combatant with hero and 10\n"
+            "create max_health as combatant_max_health with hero\n"
+            "create armor as combatant_armor with hero\n"
+            "call set_combatant_armor with hero and armor\n"
+            "call apply_status_effect with hero and text poison end text and 3 and 2\n"
+            "call update_status_effects with hero and 0.5\n"
+            "create alive as is_combatant_alive with hero\n"
+            "create poisoned as has_status_effect with hero and text poison end text\n"
+            "create remaining as status_effect_remaining with hero and text poison end text\n"
+            "create removed as remove_status_effect with hero and text poison end text\n"
+            "call clear_status_effects with hero\n"
+            "call destroy_combatant with hero\n"
+        )
+        validate_source(source)
+        generated = CGenerator(parse_source(source)).generate()
+        for api in (
+            "CREATE_COMBATANT", "APPLY_DAMAGE", "HEAL_COMBATANT",
+            "APPLY_STATUS_EFFECT", "UPDATE_STATUS_EFFECTS",
+            "IS_COMBATANT_ALIVE", "CLEAR_STATUS_EFFECTS", "DESTROY_COMBATANT",
+        ):
+            with self.subTest(api=api):
+                self.assertIn(f"case Z_GAME_{api}", generated)
+        self.assertIn("Damage must be finite and non-negative", generated)
+        self.assertIn("Armor must be finite and non-negative", generated)
+        self.assertIn("Status-effect delta must be finite and non-negative", generated)
+        self.assertIn('TextIsEqual(effect->name, "regeneration")', generated)
+        self.assertIn('TextIsEqual(effect->name, "poison")', generated)
+        self.assertIn("z_combatants[handle].generation != generation", generated)
+        self.assertIn("Maximum number of status effects reached", generated)
+
+        with self.assertRaisesRegex(CompileError, "expects combatant, got sound"):
+            validate_source(
+                "create effect as load_sound with text effect.wav end text\n"
+                "create health as combatant_health with effect\n"
+                "call unload_sound with effect\n"
+            )
+        with self.assertRaisesRegex(CompileError, "expects 4 arguments, got 3"):
+            validate_source(
+                "create hero as create_combatant with 100 and 0\n"
+                "call apply_status_effect with hero and text poison end text and 3\n"
+                "call destroy_combatant with hero\n"
+            )
+
+    def test_voxel_world_example_and_face_api(self):
+        example = Path(__file__).resolve().parents[1] / "examples" / "voxel_world.zelix"
+        validate_file(example)
+        source = example.read_text(encoding="utf-8")
+        self.assertIn("call draw_voxel_world with blocks", source)
+        self.assertIn("function terrain_height", source)
+        self.assertIn("world_seed as 37", source)
+        self.assertIn("call set_voxel_render_distance with render_distance", source)
+        self.assertIn("call set_camera_3d with camera_x", source)
+        self.assertNotIn("call draw_voxel_face with", source)
+
+        generated = CGenerator(parse_source(
+            "call draw_voxel_face with 0 and 0 and 0 and 1 and text top end text "
+            "and text green end text\n"
+        )).generate()
+        self.assertIn("case Z_GAME_DRAW_VOXEL_FACE", generated)
+        self.assertEqual(GAME_FUNCTIONS["draw_voxel_face"], 6)
+        self.assertIn("DrawTriangle3D(a, b, c, color);", generated)
+        self.assertIn("DrawTriangle3D(a, c, d, color);", generated)
+        with self.assertRaisesRegex(
+            CompileError, "Game API draw_voxel_face expects 6 arguments, got 5"
+        ):
+            validate_source(
+                "call draw_voxel_face with 0 and 0 and 0 and 1 and text top end text\n"
+            )
+
+        world_source = (
+            "create blocks as list<number> with list with 1\n"
+            "call draw_voxel_world with blocks and 1 and 1 and 1 and "
+            "text green end text and text brown end text and text gray end text "
+            "and text blue end text\n"
+        )
+        validate_source(world_source)
+        world_generated = CGenerator(parse_source(world_source)).generate()
+        self.assertIn("case Z_GAME_DRAW_VOXEL_WORLD", world_generated)
+        self.assertEqual(GAME_FUNCTIONS["draw_voxel_world"], 8)
+        self.assertIn("rlBegin(RL_TRIANGLES);", world_generated)
+        self.assertIn("rlEnd();", world_generated)
+        self.assertIn("z_game_voxel_face(world_x, world_y, world_z, 0.5f, face);", world_generated)
+        self.assertEqual(world_generated.count("rlBegin(RL_TRIANGLES);"), 1)
+        with self.assertRaisesRegex(
+            CompileError, "Game API draw_voxel_world expects 8 arguments, got 4"
+        ):
+            validate_source("call draw_voxel_world with blocks and 8 and 4 and 8\n")
+
+        camera_source = (
+            "call set_camera_3d with 0 and 8 and 12 and 0 and 0 and 0\n"
+            "call set_voxel_render_distance with 48\n"
+            "create distance as distance_3d with 0 and 8 and 12 and 0 and 0 and 0\n"
+        )
+        validate_source(camera_source)
+        camera_generated = CGenerator(parse_source(camera_source)).generate()
+        for api in ("SET_CAMERA_3D", "SET_VOXEL_RENDER_DISTANCE", "DISTANCE_3D"):
+            with self.subTest(api=api):
+                self.assertIn(f"case Z_GAME_{api}", camera_generated)
+        self.assertIn("z_camera_3d_initialized = true;", camera_generated)
+        self.assertIn("dx * dx + dy * dy + dz * dz > render_distance_squared", camera_generated)
+        self.assertIn("sqrt(dx * dx + dy * dy + dz * dz)", camera_generated)
+        self.assertEqual(GAME_FUNCTIONS["set_camera_3d"], 6)
+        self.assertEqual(GAME_FUNCTIONS["set_voxel_render_distance"], 1)
+        self.assertEqual(GAME_FUNCTIONS["distance_3d"], 6)
+        with self.assertRaisesRegex(CompileError, "expects 6 arguments, got 3"):
+            validate_source("call set_camera_3d with 0 and 0 and 0\n")
 
     def test_raylib_build_adds_headers_and_platform_libraries(self):
         source_text = "call init_window with 640 and 480 and text Game end text\n"
@@ -512,7 +1230,9 @@ class ZelixTests(unittest.TestCase):
         for example in (
             "hello.zelix", "basics.zelix", "functions.zelix", "loops.zelix",
             "input.zelix", "game_2d.zelix", "game_3d.zelix", "game_multiplayer.zelix",
-            "game_sprites.zelix",
+            "game_sprites.zelix", "game_combat.zelix", "game_ecs_physics.zelix",
+            "game_3d_physics.zelix",
+            "game_ai_particles.zelix",
         ):
             with self.subTest(example=example):
                 validate_source((root / "examples" / example).read_text(encoding="utf-8"))
@@ -730,7 +1450,7 @@ class ZelixTests(unittest.TestCase):
 
         with contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(main(["--version"]), 0)
-        self.assertIn("Zelix 0.3.2", output.getvalue())
+        self.assertIn("Zelix 0.4.0", output.getvalue())
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "project"
@@ -973,23 +1693,43 @@ class ZelixTests(unittest.TestCase):
         manifest = json.loads((root / "vscode-zelix" / "package.json").read_text(encoding="utf-8"))
         contributes = manifest["contributes"]
         self.assertIn('"debug_server"', package)
-        self.assertEqual(manifest["version"], "0.4.2")
+        self.assertEqual(manifest["version"], "0.5.0")
         self.assertEqual(manifest["icon"], "images/zelix-icon.png")
         self.assertEqual(contributes["debuggers"][0]["type"], "zelix")
         self.assertIn("zelix.debugCurrentFile", {
             command["command"] for command in contributes["commands"]
         })
         extension_source = (root / "vscode-zelix" / "extension.js").read_text(encoding="utf-8")
-        for feature in ("draw_sprite", "create_animation", "set_camera_2d", "mouse_world_x"):
+        for feature in (
+            "draw_sprite", "create_animation", "set_camera_2d", "mouse_world_x",
+            "create_combatant", "apply_status_effect", "create_entity",
+            "add_box_collider", "entity_collides", "add_transform_3d",
+            "add_box_collider_3d", "physics_set_gravity_3d",
+            "entity_set_velocity_3d",
+            "create_path_grid", "find_path", "emit_particles",
+            "update_particle_emitter",
+        ):
             self.assertIn(f'"{feature}"', extension_source)
+        self.assertIn('"draw_voxel_world"', extension_source)
         self.assertIn('"string"', extension_source)
         grammar = (root / "vscode-zelix" / "syntaxes" / "zelix.tmLanguage.json").read_text(encoding="utf-8")
         self.assertIn("|text|string|", grammar)
         for feature in ("sleep", "spawn_thread", "COLLECTION_FUNCTIONS"):
             self.assertIn(feature, extension_source)
+        for feature in (
+            "modapi_items", "modapi_recipes", "modapi_recipes_for", "modapi_item_id",
+            "getitembyid", "getidforitem", "getrecipe", "getrecipesforid",
+            "modapi_register_item", "modapi_register_block", "modapi_recipe_gui",
+        ):
+            self.assertIn(feature, extension_source)
         extension_snippets = (root / "vscode-zelix" / "snippets" / "zelix.json").read_text(encoding="utf-8")
         self.assertIn('"Zelix async channel producer"', extension_snippets)
         self.assertIn('"Zelix set of string arrays"', extension_snippets)
+        self.assertIn('"Zelix batched voxel world"', extension_snippets)
+        self.assertIn('"Zelix combatant and status effects"', extension_snippets)
+        self.assertIn('"Zelix ECS physics entities"', extension_snippets)
+        self.assertIn('"Zelix 3D ECS physics entities"', extension_snippets)
+        self.assertIn('"Zelix enemy pathfinding and particles"', extension_snippets)
 
     def test_benchmark_harness_smoke(self):
         root = Path(__file__).resolve().parents[1]

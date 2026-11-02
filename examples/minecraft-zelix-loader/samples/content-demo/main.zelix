@@ -1,0 +1,14 @@
+function handle_event taking event as text returning void
+    if event is "load"
+        create copper_item_id as modapi_register_item with text copper_ingot end text and 64
+        create copper_block_item_id as modapi_register_block with text copper_ore end text and text rock end text and 3
+        display copper_item_id
+        display copper_block_item_id
+    end if
+end function
+
+create loader_event as input text
+while loader_event is not "stop"
+    call handle_event with loader_event
+    loader_event becomes input text
+end loop

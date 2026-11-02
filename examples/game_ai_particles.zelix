@@ -1,0 +1,43 @@
+create navigation as create_path_grid with 12 and 8 and 32
+repeat with wall_y from 0 to 5
+    call set_path_blocked with navigation and 5 and wall_y and true
+end loop
+
+create enemy_route as find_path with navigation and 1 and 1 and 10 and 6
+create enemy as create_entity
+call add_transform with enemy and 48 and 48
+create sparks as create_particle_emitter with 128
+call set_particle_gravity with sparks and 80
+
+call init_window with 800 and 460 and text Zelix Enemy Navigation and Particles end text
+call set_target_fps with 60
+
+while not window_should_close
+    create delta as frame_time
+    create arrived as follow_path with enemy_route and enemy and 90 and delta
+    call update_particle_emitter with sparks and delta
+
+    if key_pressed with text space end text
+        create enemy_x as entity_x with enemy
+        create enemy_y as entity_y with enemy
+        call emit_particles with sparks and enemy_x and enemy_y and 24 and 0.8 and 120 and text orange end text
+    end if
+
+    create enemy_draw_x as entity_x with enemy
+    create enemy_draw_y as entity_y with enemy
+    call begin_drawing
+    call clear_background with text raywhite end text
+    call draw_rectangle with 160 and 0 and 32 and 192 and text darkgray end text
+    call draw_rectangle with 160 and 224 and 32 and 32 and text darkgray end text
+    call draw_circle with enemy_draw_x and enemy_draw_y and 12 and text red end text
+    call draw_particle_emitter with sparks
+    call draw_text with text A-star enemy follows the open corridor; Space emits particles end text and 16 and 16 and 20 and text black end text
+    call draw_text with text The path is precomputed on a 12 by 8 grid end text and 16 and 42 and 18 and text darkgray end text
+    call end_drawing
+end loop
+
+call close_window
+call destroy_particle_emitter with sparks
+call destroy_entity with enemy
+call destroy_path with enemy_route
+call destroy_path_grid with navigation

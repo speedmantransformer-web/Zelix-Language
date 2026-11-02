@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0 - 2026-11-01
+
+- Expanded the authenticated Minecraft ModAPI bridge with item/block registration, mod-local resource-pack assets, JEI-style lookup helpers, and a crafting-table recipe browser that transfers ingredients using vanilla inventory clicks.
+- Added persistent 3D camera positioning, voxel render-distance culling, a 3D distance API, and deterministic seeded voxel terrain generation in the world example.
+- Added an immediate-mode 2D game UI (panels, labels, buttons, checkboxes, and progress bars) and typed number/text/boolean save-load APIs with bounded encoding and explicit errors.
+- Added bounded 2D A* path grids with entity waypoint following and native CPU particle emitters.
+- Added generation-checked 2D entities with transform, rigidbody, and box-collider components, plus substepped AABB collision resolution with restitution and friction.
+- Extended ECS physics to 3D transforms, velocity, force, box colliders, vector gravity, and substepped 3D AABB collision response.
+- Added typed native combatants with health, flat armor, damage/healing, and refreshable poison, burning, and regeneration effects.
+- Added opt-in strict type checking, including explicit function-boundary types and rejection of unchecked `any` at typed boundaries.
+- Added static texture and sound handle checks against copying, collection/channel escapes, leaks, use after release, and inconsistent branch/loop release; native cleanup now covers runtime errors and rejects double sound unloads.
+- Added local project `check`, `build`, `run`, and `test` workflows plus the `assert` test builtin.
+- Added local constant propagation, statically typed numeric C-code specialization, and an optional Rust baseline to the benchmark harness.
+
 ## 0.3.2 - 2026-10-29
 
 - Added set support for string arrays, comparing array contents for duplicates, membership, and removal.

@@ -7,7 +7,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class RuntimeBridge {
     private static final AtomicBoolean SHUTDOWN_HOOK_REGISTERED = new AtomicBoolean();
     private static volatile ModRuntime runtime;
-    private static int updateCount;
 
     private RuntimeBridge() {
     }
@@ -28,8 +27,6 @@ public final class RuntimeBridge {
             Runtime.getRuntime().addShutdownHook(new Thread(
                     RuntimeBridge::stop, "zelix-mod-shutdown"));
         }
-        newRuntime.dispatch("minecraft_version_" + minecraftVersion.replace('.', '_'));
-        newRuntime.dispatch("load");
     }
 
     public static void onClientTick() {
@@ -37,10 +34,7 @@ public final class RuntimeBridge {
         if (current == null) {
             return;
         }
-        updateCount++;
-        if (updateCount % 20 == 0) {
-            current.dispatch("tick");
-        }
+        current.onClientTick();
     }
 
     public static synchronized void stop() {

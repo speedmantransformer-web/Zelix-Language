@@ -1,0 +1,124 @@
+# This world is stored in one flat list using x + width * (z + depth * y).
+# The indexing formula makes the list a compact representation of a 3D grid.
+
+function voxel_index taking x as number and y as number and z as number and width as number and depth as number returning number
+    return x plus width times (z plus depth times y)
+end function
+
+function get_voxel taking blocks as list<number> and x as number and y as number and z as number and width as number and height as number and depth as number returning number
+    if x is less than 0 or x is greater than or equal to width or y is less than 0 or y is greater than or equal to height or z is less than 0 or z is greater than or equal to depth
+        return 0
+    end if
+    return get with blocks and (voxel_index with x and y and z and width and depth)
+end function
+
+function set_voxel taking blocks as list<number> and x as number and y as number and z as number and width as number and depth as number and block_type as number returning void
+    create index as voxel_index with x and y and z and width and depth
+    call insert with blocks and index and block_type
+    call remove with blocks and index plus 1
+end function
+
+create block_air as 0
+create block_grass as 1
+create block_dirt as 2
+create block_stone as 3
+create block_water as 4
+create world_seed as 37
+create world_width as 48
+create world_height as 16
+create world_depth as 48
+create sea_level as 7
+create blocks as list<number> with empty_list with
+
+# Deterministic integer noise gives repeatable hills for the selected seed.
+function terrain_height taking x as number and z as number and seed as number returning number
+    create noise as (x times 73 plus z times 151 plus seed times 199 plus x times z times 17) remainder 11
+    return 4 plus noise
+end function
+
+function generated_block taking x as number and y as number and z as number and seed as number and waterline as number returning number
+    create surface as terrain_height with x and z and seed
+    if y is 0
+        return block_stone
+    end if
+    if y is greater than surface
+        if y is less than or equal to waterline
+            return block_water
+        end if
+        return block_air
+    end if
+    if y is surface
+        return block_grass
+    end if
+    if y is greater than surface minus 3
+        return block_dirt
+    end if
+    return block_stone
+end function
+
+# Fill the 3D array in the order expected by draw_voxel_world.
+repeat with y from 0 to 15
+    repeat with z from 0 to 47
+        repeat with x from 0 to 47
+            create block as generated_block with x and y and z and world_seed and sea_level
+            call append with blocks and block
+        end loop
+    end loop
+end loop
+
+call init_window with 900 and 650 and text Zelix Voxel World end text
+call set_target_fps with 60
+create camera_x as 0
+create camera_y as 17
+create camera_z as 31
+create target_x as 0
+create target_y as 5
+create target_z as 0
+create render_distance as 28
+
+while not window_should_close
+    create delta as frame_time
+    create movement as delta times 12
+    if key_down with text w end text
+        camera_z becomes camera_z minus movement
+        target_z becomes target_z minus movement
+    end if
+    if key_down with text s end text
+        camera_z becomes camera_z plus movement
+        target_z becomes target_z plus movement
+    end if
+    if key_down with text a end text
+        camera_x becomes camera_x minus movement
+        target_x becomes target_x minus movement
+    end if
+    if key_down with text d end text
+        camera_x becomes camera_x plus movement
+        target_x becomes target_x plus movement
+    end if
+    if key_down with text up end text
+        render_distance becomes render_distance plus delta times 24
+    end if
+    if key_down with text down end text
+        render_distance becomes render_distance minus delta times 24
+    end if
+    if render_distance is less than 8
+        render_distance becomes 8
+    end if
+    if render_distance is greater than 72
+        render_distance becomes 72
+    end if
+    call set_voxel_render_distance with render_distance
+    call set_camera_3d with camera_x and camera_y and camera_z and target_x and target_y and target_z
+
+    call begin_drawing
+    call clear_background with text skyblue end text
+    call begin_3d
+
+    call draw_voxel_world with blocks and world_width and world_height and world_depth and text green end text and text brown end text and text gray end text and text blue end text
+
+    call end_3d
+    call draw_text with text Seeded terrain | WASD move | Up/Down render distance end text and 18 and 18 and 20 and text darkgray end text
+    call end_drawing
+end loop
+
+call close_window

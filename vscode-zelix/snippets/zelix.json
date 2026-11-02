@@ -99,6 +99,40 @@
     ],
     "description": "Call a Zelix function"
   },
+  "Zelix voxel face": {
+    "prefix": "voxel-face",
+    "body": [
+      "call draw_voxel_face with ${1:0} and ${2:0} and ${3:0} and ${4:1} and text ${5|top,bottom,left,right,front,back|} end text and text ${6:green} end text"
+    ],
+    "description": "Draw one exposed face of a voxel"
+  },
+  "Zelix batched voxel world": {
+    "prefix": "voxel-world",
+    "body": [
+      "call set_camera_3d with ${1:0} and ${2:12} and ${3:20} and ${4:0} and ${5:0} and ${6:0}",
+      "call set_voxel_render_distance with ${7:48}",
+      "call begin_3d",
+      "call draw_voxel_world with ${8:blocks} and ${9:world_width} and ${10:world_height} and ${11:world_depth} and text ${12:green} end text and text ${13:brown} end text and text ${14:gray} end text and text ${15:blue} end text",
+      "call end_3d"
+    ],
+    "description": "Draw a numeric voxel grid with a configurable camera and render distance"
+  },
+  "Zelix Minecraft ModAPI": {
+    "prefix": "modapi",
+    "body": [
+      "create ${1:item_id} as modapi_item_id with text ${2:minecraft:planks} end text",
+      "create ${3:items} as modapi_items",
+      "create ${4:recipes} as modapi_recipes_for with ${1:item_id}",
+      "create ${5:item} as getItemById with ${1:item_id}",
+      "create ${6:recipe} as getRecipe with ${1:item_id} and 0",
+      "create ${7:new_item_id} as modapi_register_item with text ${8:copper_ingot} end text and 64",
+      "create ${9:new_block_item_id} as modapi_register_block with text ${10:copper_ore} end text and text rock end text and 3",
+      "create ${11:recipe_gui_opened} as modapi_recipe_gui",
+      "display length with ${3:items}",
+      "display length with ${4:recipes}"
+    ],
+    "description": "Register simple Minecraft content and browse/transfer recipes in-game"
+  },
   "Zelix counted loop": {
     "prefix": "counted",
     "body": [
@@ -177,6 +211,84 @@
       "call physics_update with frame_time"
     ],
     "description": "Create an AABB physics body and advance the simulation"
+  },
+  "Zelix ECS physics entities": {
+    "prefix": "ecs",
+    "body": [
+      "create ${1:player} as create_entity",
+      "call add_transform with ${1:player} and ${2:40} and ${3:40}",
+      "call add_rigidbody with ${1:player} and ${4:1}",
+      "call add_box_collider with ${1:player} and ${5:32} and ${6:32} and ${7:0.1} and ${8:0.3}",
+      "call physics_set_gravity with ${9:600}",
+      "call physics_update with frame_time",
+      "create ${10:x} as entity_x with ${1:player}",
+      "create ${11:y} as entity_y with ${1:player}"
+    ],
+    "description": "Create an entity with transform, dynamic rigidbody, and material AABB collider"
+  },
+  "Zelix 3D ECS physics entities": {
+    "prefix": "ecs3d",
+    "body": [
+      "create ${1:crate} as create_entity",
+      "call add_transform_3d with ${1:crate} and ${2:0} and ${3:3} and ${4:0}",
+      "call add_rigidbody with ${1:crate} and ${5:1}",
+      "call add_box_collider_3d with ${1:crate} and ${6:1} and ${7:1} and ${8:1} and ${9:0.1} and ${10:0.3}",
+      "call physics_set_gravity_3d with 0 and ${11:-9.8} and 0",
+      "call physics_update with frame_time",
+      "create ${12:x} as entity_x with ${1:crate}",
+      "create ${13:y} as entity_y with ${1:crate}",
+      "create ${14:z} as entity_z with ${1:crate}"
+    ],
+    "description": "Create a 3D entity with vector gravity and a material box collider"
+  },
+  "Zelix enemy pathfinding and particles": {
+    "prefix": "enemyai",
+    "body": [
+      "create ${1:navigation} as create_path_grid with ${2:16} and ${3:12} and ${4:32}",
+      "call set_path_blocked with ${1:navigation} and ${5:6} and ${6:5} and true",
+      "create ${7:route} as find_path with ${1:navigation} and ${8:1} and ${9:1} and ${10:14} and ${11:10}",
+      "create ${12:enemy} as create_entity",
+      "call add_transform with ${12:enemy} and ${13:48} and ${14:48}",
+      "create ${15:sparks} as create_particle_emitter with ${16:128}",
+      "create ${17:delta} as frame_time",
+      "create ${18:arrived} as follow_path with ${7:route} and ${12:enemy} and ${19:90} and ${17:delta}",
+      "call update_particle_emitter with ${15:sparks} and ${17:delta}",
+      "call draw_particle_emitter with ${15:sparks}"
+    ],
+    "description": "Set up grid A* movement for an enemy and a bounded particle emitter"
+  },
+  "Zelix combatant and status effects": {
+    "prefix": "combat",
+    "body": [
+      "create ${1:hero} as create_combatant with ${2:100} and ${3:5}",
+      "create ${4:enemy} as create_combatant with ${5:60} and ${6:2}",
+      "call apply_damage with ${1:hero} and ${7:12}",
+      "call apply_status_effect with ${4:enemy} and text ${8:poison} end text and ${9:4} and ${10:3}",
+      "call update_status_effects with ${4:enemy} and frame_time",
+      "display combatant_health with ${4:enemy}",
+      "call destroy_combatant with ${1:hero}",
+      "call destroy_combatant with ${4:enemy}"
+    ],
+    "description": "Create combatants and apply damage-over-time status effects"
+  },
+  "Zelix game UI and persistence": {
+    "prefix": "gameui",
+    "body": [
+      "create ${1:score} as load_number with text ${2:profile.sav} end text and text ${3:score} end text and ${4:0}",
+      "call init_window with ${5:800} and ${6:450} and text ${7:My Game} end text",
+      "while not window_should_close",
+      "\tcall begin_drawing",
+      "\tcall clear_background with text rayblack end text",
+      "\tcall ui_panel with ${8:24} and ${9:24} and ${10:320} and ${11:200} and text ${12:Settings} end text",
+      "\tcreate ${13:save} as ui_button with ${14:40} and ${15:80} and ${16:140} and ${17:36} and text ${18:Save} end text",
+      "\tif ${13:save}",
+      "\t\tcall save_number with text ${2:profile.sav} end text and text ${3:score} end text and ${1:score}",
+      "\tend if",
+      "\tcall end_drawing",
+      "end loop",
+      "call close_window"
+    ],
+    "description": "Build an immediate-mode 2D game panel and persist a numeric value"
   },
   "Zelix UDP send": {
     "prefix": "udpsend",

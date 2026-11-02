@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Zelix 0.2.0: a line-oriented interpreter and native compiler."""
+"""Zelix 0.4.0: a line-oriented interpreter and native compiler."""
 
 from __future__ import annotations
 import argparse
@@ -7,9 +7,12 @@ import asyncio
 import ast
 import concurrent.futures
 from contextvars import ContextVar
+import json
 import operator
+import os
 import queue
 import re
+import socket
 import sys
 import threading
 from dataclasses import dataclass
@@ -18,7 +21,10 @@ from typing import Any, Protocol
 
 from compiler import CompileError, compile_file, emit_ir_file, validate_file, validate_source
 from game_backend import GAME_FUNCTIONS
-from project import ProjectError, init_project, install_project, project_entry, resolve_project_source
+from project import (
+    ProjectError, init_project, install_project, load_project, project_entry,
+    resolve_project_source,
+)
 from syntax import (
     Assign, Await, Binary, Call, CallStatement, Create, Display, Expr, If, Input, Lexer,
     Literal, RangeLoop, Repeat, Return, Spawn, Stmt, Unary, Variable, While,
@@ -26,7 +32,7 @@ from syntax import (
 )
 from typesys import TypeChecker, TypeCheckError
 
-VERSION = "0.3.2"
+VERSION = "0.4.0"
 
 class ZelixError(Exception):
     pass
@@ -283,11 +289,12 @@ class ExpressionParser:
             raise ZelixError(f"Invalid operands for {op}: {a!r} and {b!r}") from exc
 
 class Interpreter:
-    def __init__(self, debugger: Debugger | None = None):
+    def __init__(self, debugger: Debugger | None = None, strict: bool = False):
         self.env: dict[str, Any] = {}
         self.functions: dict[str, Function] = {}
         self._call_depth: ContextVar[int] = ContextVar("zelix_call_depth", default=0)
         self.debugger = debugger
+        self.strict = strict
 
     def error(self, line_no: int, message: str):
         raise ZelixError(f"Line {line_no}: {message}")
@@ -307,7 +314,7 @@ class Interpreter:
             raise ZelixError(str(exc)) from exc
         module = parse_source(source)
         try:
-            TypeChecker(module).check()
+            TypeChecker(module, strict=self.strict).check()
         except TypeCheckError as exc:
             raise ZelixError(str(exc)) from exc
         self.functions = {
@@ -410,7 +417,10 @@ class Interpreter:
                 "empty_set", "append", "insert", "add_to_set", "put", "get",
                 "remove", "contains",
                 "length", "keys", "values", "channel", "send", "receive",
-                "close_channel", "sleep",
+                "close_channel", "sleep", "assert", "modapi_items", "modapi_recipes",
+                "modapi_recipes_for", "modapi_item_id", "getitembyid",
+                "getidforitem", "getrecipe", "getrecipesforid",
+                "modapi_register_item", "modapi_register_block", "modapi_recipe_gui",
             }:
                 if expression.name == "channel":
                     if (
@@ -480,6 +490,91 @@ class Interpreter:
         return asyncio.run(child.call_function(name, args))
 
     def call_builtin(self, name: str, args: list[Any], line: int) -> Any:
+        if name in {"modapi_items", "modapi_recipes"}:
+            if args:
+                self.error(line, f"{name} expects no arguments")
+            return self._modapi_query(name.removeprefix("modapi_"), None, line)
+        if name == "modapi_recipe_gui":
+            if args:
+                self.error(line, "modapi_recipe_gui expects no arguments")
+            return self._modapi_query("recipe_gui", [], line)
+        if name in {"modapi_register_item", "modapi_register_block"}:
+            expected = 2 if name == "modapi_register_item" else 3
+            if len(args) != expected or not isinstance(args[0], str):
+                self.error(line, f"{name} expects a name and its registration properties")
+            if name == "modapi_register_item":
+                if (
+                    isinstance(args[1], bool) or not isinstance(args[1], int)
+                    or not 1 <= args[1] <= 64
+                ):
+                    self.error(line, "modapi_register_item stack size must be from 1 to 64")
+                return self._modapi_query(
+                    "register_item",
+                    [os.environ.get("ZELIX_MODAPI_MOD_ID", ""), args[0], args[1]],
+                    line,
+                )
+            if (
+                not isinstance(args[1], str)
+                or isinstance(args[2], bool)
+                or not isinstance(args[2], (int, float))
+                or not 0 <= args[2] <= 50
+            ):
+                self.error(
+                    line,
+                    "modapi_register_block expects a material name and hardness from 0 to 50",
+                )
+            return self._modapi_query(
+                "register_block",
+                [os.environ.get("ZELIX_MODAPI_MOD_ID", ""), args[0], args[1], args[2]],
+                line,
+            )
+        if name == "getitembyid":
+            if (
+                len(args) != 1 or isinstance(args[0], bool)
+                or not isinstance(args[0], int) or not 0 <= args[0] <= 2147483647
+            ):
+                self.error(line, "getItemById expects a non-negative whole-number item ID")
+            return self._modapi_query("item_by_id", [args[0]], line)
+        if name == "getidforitem":
+            if len(args) != 1 or not isinstance(args[0], str):
+                self.error(line, "getIdForItem expects one registry-name text")
+            return self._modapi_query("item_id", [args[0]], line)
+        if name == "getrecipe":
+            if (
+                len(args) != 2 or any(
+                    isinstance(value, bool)
+                    or not isinstance(value, int)
+                    or not 0 <= value <= 2147483647
+                    for value in args
+                )
+            ):
+                self.error(line, "getRecipe expects an item ID and a non-negative recipe index")
+            return self._modapi_query("recipe", args, line)
+        if name == "getrecipesforid":
+            if (
+                len(args) != 1 or isinstance(args[0], bool)
+                or not isinstance(args[0], int) or not 0 <= args[0] <= 2147483647
+            ):
+                self.error(line, "getRecipesForId expects a non-negative whole-number item ID")
+            return self._modapi_query("recipes_for", args, line)
+        if name == "modapi_recipes_for":
+            if (
+                len(args) != 1 or isinstance(args[0], bool)
+                or not isinstance(args[0], (int, float))
+                or not 0 <= args[0] <= 2147483647
+                or int(args[0]) != args[0]
+            ):
+                self.error(
+                    line,
+                    "modapi_recipes_for expects a whole-number item ID from 0 to 2147483647",
+                )
+            return self._modapi_query("recipes_for", [int(args[0])], line)
+        if name == "modapi_item_id":
+            if len(args) != 1 or not isinstance(args[0], str):
+                self.error(line, "modapi_item_id expects one registry-name text")
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+:[A-Za-z0-9_./-]+", args[0]):
+                self.error(line, "ModAPI registry name must use namespace:path format")
+            return self._modapi_query("item_id", [args[0]], line)
         try:
             if name == "list":
                 return list(args)
@@ -536,9 +631,71 @@ class Interpreter:
                 return list(args[0].keys())
             if name == "values":
                 return list(args[0].values())
+            if name == "assert":
+                if len(args) != 1 or not isinstance(args[0], bool):
+                    self.error(line, "assert expects one boolean condition")
+                if not args[0]:
+                    self.error(line, "Assertion failed")
+                return None
         except (IndexError, KeyError, TypeError, ValueError) as exc:
             self.error(line, f"Invalid {name} operation: {exc}")
         return None
+
+    def _modapi_query(self, operation: str, arguments: Any, line: int) -> Any:
+        port_text = os.environ.get("ZELIX_MODAPI_PORT")
+        token = os.environ.get("ZELIX_MODAPI_TOKEN")
+        try:
+            port = int(port_text or "")
+        except ValueError:
+            self.error(line, "ModAPI queries are available only inside the Zelix Minecraft loader")
+        if not 1 <= port <= 65535 or not token:
+            self.error(line, "ModAPI queries are available only inside the Zelix Minecraft loader")
+        if arguments is None:
+            arguments = []
+        elif not isinstance(arguments, list):
+            arguments = [arguments]
+        request = "\t".join(
+            [token, operation, *(str(argument) for argument in arguments)]
+        )
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=50) as connection:
+                connection.settimeout(50)
+                connection.sendall((request + "\n").encode("utf-8"))
+                response = bytearray()
+                while len(response) <= 16 * 1024 * 1024:
+                    chunk = connection.recv(8192)
+                    if not chunk:
+                        break
+                    newline = chunk.find(b"\n")
+                    response.extend(chunk if newline < 0 else chunk[:newline])
+                    if newline >= 0:
+                        break
+                if len(response) > 16 * 1024 * 1024:
+                    self.error(line, "ModAPI response exceeds the maximum supported size")
+                result = json.loads(response.decode("utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            self.error(line, f"ModAPI query failed: {exc}")
+        if isinstance(result, dict) and "error" in result:
+            self.error(line, f"ModAPI query failed: {result['error']}")
+        if operation in {"items", "recipes", "recipes_for"} and not isinstance(result, list):
+            self.error(line, "ModAPI returned an invalid item or recipe response")
+        if operation in {"item_id", "register_item", "register_block"} and (
+            isinstance(result, bool) or not isinstance(result, int)
+        ):
+            self.error(line, "ModAPI returned an invalid item ID")
+        if operation == "item_by_id" and (
+            not isinstance(result, dict) or not isinstance(result.get("registry_name"), str)
+        ):
+            self.error(line, "ModAPI returned an invalid item record")
+        if operation == "recipe" and (
+            not isinstance(result, dict) or "ingredients" not in result
+        ):
+            self.error(line, "ModAPI returned an invalid recipe")
+        if operation == "recipe_gui" and (
+            isinstance(result, bool) or not isinstance(result, int)
+        ):
+            self.error(line, "ModAPI returned an invalid recipe browser status")
+        return result
 
     def _collection_index(self, value: Any, length: int, line: int, allow_end=False) -> int:
         if isinstance(value, bool) or not isinstance(value, int):
@@ -624,21 +781,65 @@ class Interpreter:
 
 def main(argv: list[str] | None = None):
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments and arguments[0] in {"init", "install"}:
-        project_parser = argparse.ArgumentParser(prog=f"zelix {arguments[0]}")
-        project_parser.add_argument("path", nargs="?", default=".", help="Project directory")
+    if arguments and arguments[0] in {"init", "install", "check", "build", "run", "test"}:
         command = arguments[0]
+        project_parser = argparse.ArgumentParser(prog=f"zelix {command}")
+        project_parser.add_argument("path", nargs="?", default=".", help="Project directory")
+        if command in {"check", "build", "run", "test"}:
+            project_parser.add_argument(
+                "--strict", action="store_true", help="Reject unchecked dynamic types",
+            )
+        if command == "build":
+            project_parser.add_argument("-o", "--output", help="Set the native executable path")
+            project_parser.add_argument("--cc", help="Choose the C compiler executable")
         options = project_parser.parse_args(arguments[1:])
         try:
             if command == "init":
                 manifest, entry = init_project(Path(options.path))
                 print(f"Created {manifest}")
                 print(f"Created {entry}")
-            else:
+                return 0
+            if command == "install":
                 lockfile = install_project(Path(options.path))
                 print(f"Updated {lockfile}")
+                return 0
+            project = load_project(Path(options.path))
+            if command == "check":
+                source_roots = [project.root / "src", project.root / "tests"]
+                sources = {
+                    path for root in source_roots if root.is_dir()
+                    for path in root.rglob("*.zelix")
+                }
+                sources.add(project.entry)
+                for source_path in sorted(sources):
+                    validate_file(source_path, strict=options.strict)
+                print(f"Checked {len(sources)} Zelix source file(s)")
+                return 0
+            if command == "build":
+                suffix = ".exe" if sys.platform == "win32" else ""
+                output = Path(options.output) if options.output else (
+                    project.root / "target" / f"{project.name}{suffix}"
+                )
+                executable, _ = compile_file(
+                    project.entry, output, options.cc, strict=options.strict,
+                )
+                print(f"Built {executable}")
+                return 0
+            if command == "run":
+                Interpreter(strict=options.strict).run_file(project.entry)
+                return 0
+            test_root = project.root / "tests"
+            test_files = sorted(test_root.rglob("*.zelix")) if test_root.is_dir() else []
+            if not test_files:
+                print("No Zelix tests found")
+                return 0
+            for test_file in test_files:
+                validate_file(test_file, strict=options.strict)
+            for test_file in test_files:
+                Interpreter(strict=options.strict).run_file(test_file)
+                print(f"test {test_file.relative_to(project.root).as_posix()} ... ok")
             return 0
-        except ProjectError as exc:
+        except (ProjectError, CompileError, ZelixError) as exc:
             print(f"Zelix error: {exc}", file=sys.stderr)
             return 1
 
@@ -650,6 +851,7 @@ def main(argv: list[str] | None = None):
     parser.add_argument("--cc", help="Choose the C compiler executable")
     parser.add_argument("--emit-ir", action="store_true", help="Print optimized Zelix IR")
     parser.add_argument("--check", action="store_true", help="Validate source without executing or compiling")
+    parser.add_argument("--strict", action="store_true", help="Reject unchecked dynamic types")
     parser.add_argument(
         "--asset-root", type=Path,
         help="Resolve literal game asset paths relative to this directory when validating stdin",
@@ -670,9 +872,9 @@ def main(argv: list[str] | None = None):
             asset_root = args.asset_root or Path.cwd()
             if not args.file:
                 source = resolve_project_source(sys.stdin.read(), Path.cwd())
-                validate_source(source, asset_root)
+                validate_source(source, asset_root, strict=args.strict)
             else:
-                validate_file(Path(args.file), args.asset_root)
+                validate_file(Path(args.file), args.asset_root, strict=args.strict)
             return 0
         if not args.file:
             parser.print_help()
@@ -686,14 +888,15 @@ def main(argv: list[str] | None = None):
                 Path(args.output) if args.output else None,
                 args.cc,
                 args.debug,
+                args.strict,
             )
             if args.emit_ir:
                 print(ir)
             print(f"Compiled to {output}")
         elif args.emit_ir:
-            print(emit_ir_file(source_path))
+            print(emit_ir_file(source_path, strict=args.strict))
         else:
-            Interpreter().run_file(source_path)
+            Interpreter(strict=args.strict).run_file(source_path)
         return 0
     except (ZelixError, CompileError, ProjectError) as exc:
         print(f"Zelix error: {exc}", file=sys.stderr)

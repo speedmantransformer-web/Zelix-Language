@@ -1,0 +1,40 @@
+create player as create_entity
+call add_transform with player and 80 and 60
+call add_rigidbody with player and 1
+call add_box_collider with player and 28 and 28 and 0.1 and 0.25
+
+create platform as create_entity
+call add_transform with platform and 0 and 320
+call add_rigidbody with platform and 0
+call add_box_collider with platform and 720 and 48 and 0 and 0.8
+
+call physics_set_gravity with 900
+call init_window with 720 and 400 and text Zelix ECS Physics end text
+call set_target_fps with 60
+
+while not window_should_close
+    if key_down with text left end text
+        call entity_set_velocity with player and -180 and entity_velocity_y with player
+    end if
+    if key_down with text right end text
+        call entity_set_velocity with player and 180 and entity_velocity_y with player
+    end if
+    if key_released with text left end text
+        call entity_set_velocity with player and 0 and entity_velocity_y with player
+    end if
+    if key_released with text right end text
+        call entity_set_velocity with player and 0 and entity_velocity_y with player
+    end if
+
+    call physics_update with frame_time
+    call begin_drawing
+    call clear_background with text raywhite end text
+    call draw_rectangle with entity_x with player and entity_y with player and 28 and 28 and text blue end text
+    call draw_rectangle with entity_x with platform and entity_y with platform and 720 and 48 and text darkgray end text
+    call draw_text with text ECS entities - arrows move, colliders resolve contacts end text and 16 and 16 and 18 and text black end text
+    call end_drawing
+end loop
+
+call close_window
+call destroy_entity with player
+call destroy_entity with platform

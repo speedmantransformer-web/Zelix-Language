@@ -41,6 +41,35 @@ public class MinecraftEventTransformerTest {
         assertEquals(original, transformed);
     }
 
+    @Test
+    public void injectsRecipeBrowserIntoContainerDrawAndInputMethods() {
+        byte[] transformed = new MinecraftEventTransformer().transform(
+                "net.minecraft.client.gui.inventory.GuiContainer",
+                "net.minecraft.client.gui.inventory.GuiContainer",
+                createGuiContainerClass());
+        ClassNode node = new ClassNode(Opcodes.ASM5);
+        new ClassReader(transformed).accept(node, 0);
+        int drawHooks = 0;
+        int clickHooks = 0;
+        int keyHooks = 0;
+        for (Object methodValue : node.methods) {
+            MethodNode method = (MethodNode) methodValue;
+            for (AbstractInsnNode instruction = method.instructions.getFirst();
+                    instruction != null;
+                    instruction = instruction.getNext()) {
+                if (!(instruction instanceof MethodInsnNode)) continue;
+                MethodInsnNode call = (MethodInsnNode) instruction;
+                if (!"dev/zelix/minecraft/ModApiRecipeBrowser".equals(call.owner)) continue;
+                if ("draw".equals(call.name)) drawHooks++;
+                if ("mouseClicked".equals(call.name)) clickHooks++;
+                if ("keyTyped".equals(call.name)) keyHooks++;
+            }
+        }
+        assertEquals(1, drawHooks);
+        assertEquals(1, clickHooks);
+        assertEquals(1, keyHooks);
+    }
+
     private static byte[] createMinecraftClass(String methodName) {
         ClassWriter writer = new ClassWriter(0);
         writer.visit(Opcodes.V1_6, Opcodes.ACC_PUBLIC,
@@ -57,6 +86,28 @@ public class MinecraftEventTransformerTest {
         method.visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
+    }
+
+    private static byte[] createGuiContainerClass() {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V1_6, Opcodes.ACC_PUBLIC,
+                "net/minecraft/client/gui/inventory/GuiContainer", null,
+                "java/lang/Object", null);
+        addVoidMethod(writer, "drawScreen", "(IIF)V", 4);
+        addVoidMethod(writer, "mouseClicked", "(III)V", 4);
+        addVoidMethod(writer, "keyTyped", "(CI)V", 3);
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static void addVoidMethod(
+            ClassWriter writer, String name, String descriptor, int maxLocals) {
+        MethodVisitor method = writer.visitMethod(
+                Opcodes.ACC_PUBLIC, name, descriptor, null, null);
+        method.visitCode();
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, maxLocals);
+        method.visitEnd();
     }
 
     private static int countTickHooks(byte[] bytecode) {

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, fields, is_dataclass
-from game_backend import GAME_FUNCTIONS
+from game_backend import (
+    GAME_FUNCTIONS, GAME_FUNCTION_ARGUMENT_TYPES, GAME_FUNCTION_RETURN_TYPES,
+)
 
 from syntax import (
     Assign, Await, Binary, Call, CallStatement, Create, Display, Expr, FunctionIR,
@@ -28,9 +30,14 @@ class Type:
         return f"{self.name}<{', '.join(map(str, self.arguments))}>"
 
 
-_PRIMITIVES = {"number", "text", "boolean", "any", "void", "null"}
+_PRIMITIVES = {
+    "number", "text", "boolean", "any", "void", "null", "texture", "sound",
+    "animation", "animation_machine", "combatant", "entity", "path_grid",
+    "path", "particle_emitter",
+}
 _GENERICS = {"list": 1, "set": 1, "map": 2, "tuple": -1, "task": 1, "channel": 1}
 _ALIASES = {"bool": "boolean", "string": "text"}
+_RESOURCE_TYPES = {"texture", "sound"}
 
 
 def parse_type(source: str) -> Type:
@@ -101,19 +108,40 @@ def _valid_set_element(value: Type) -> bool:
     )
 
 
+def _contains_resource(value: Type) -> bool:
+    return value.name in _RESOURCE_TYPES or any(
+        _contains_resource(argument) for argument in value.arguments
+    )
+
+
+def _contains_any(value: Type) -> bool:
+    return value.name == "any" or any(
+        _contains_any(argument) for argument in value.arguments
+    )
+
+
 def _merge(left: Type, right: Type) -> Type:
     return left if left == right else Type("any")
 
 
 class TypeChecker:
-    def __init__(self, module: ModuleIR):
+    def __init__(self, module: ModuleIR, strict: bool = False):
         self.module = module
         self.functions = {function.name: function for function in module.functions}
+        self.strict = strict
+        self._owned_resources: set[str] = set()
+        self._released_resources: set[str] = set()
+        self._function_resource_globals: set[str] = set()
+        self.expression_types: dict[int, Type] = {}
+        self._resource_initializer_call: Call | None = None
 
     def check(self) -> None:
         globals_env: dict[str, Type] = {}
         self._statements(self.module.body, globals_env, None, True, 1)
+        self._check_owned_resources_released(1)
         for function in self.module.functions:
+            self._owned_resources = set()
+            self._released_resources = set()
             generic_params = set(function.generic_params)
             if any(not _is_type_variable(item) for item in generic_params):
                 self._error(function.line, "Generic parameters must be single uppercase letters such as T")
@@ -126,13 +154,36 @@ class TypeChecker:
                             f"Undeclared generic type variable {sorted(undeclared)[0]!r}",
                         )
             env = dict(globals_env)
+            if self.strict:
+                for parameter in function.params:
+                    if parameter not in function.param_types:
+                        self._error(
+                            function.line,
+                            f"Strict mode requires a type for parameter {parameter!r}",
+                        )
+                    elif _contains_any(parse_type(function.param_types[parameter])):
+                        self._error(
+                            function.line,
+                            f"Strict mode forbids any in parameter {parameter!r}",
+                        )
+                if function.return_type is None:
+                    self._error(function.line, "Strict mode requires an explicit function return type")
+                elif _contains_any(parse_type(function.return_type)):
+                    self._error(function.line, "Strict mode forbids any as a function return type")
             env.update({
                 name: parse_type(function.param_types[name])
                 if name in function.param_types else Type("any")
                 for name in function.params
             })
+            local_names = set(function.params)
+            self._function_resource_globals = {
+                name for name, value in globals_env.items()
+                if _contains_resource(value) and name not in local_names
+            }
             return_type = parse_type(function.return_type) if function.return_type else None
             self._statements(function.body, env, return_type, function.is_async, function.line)
+            self._check_owned_resources_released(function.line)
+            self._function_resource_globals = set()
             if function.is_async:
                 self._validate_task_target(function, function.line)
 
@@ -140,10 +191,30 @@ class TypeChecker:
         raise TypeCheckError(f"Line {line}: {message}")
 
     def _expect(self, line: int, expected: Type, actual: Type, context: str) -> None:
+        if self.strict and _contains_any(actual) and not _contains_any(expected):
+            self._error(
+                line,
+                f"Strict mode cannot verify {context} because its type is {actual}",
+            )
         if not _compatible(expected, actual):
             self._error(line, f"{context} expects {expected}, got {actual}")
 
+    def _check_owned_resources_released(self, line: int) -> None:
+        leaked = sorted(self._owned_resources - self._released_resources)
+        if leaked:
+            self._error(
+                line,
+                f"Owned resource {leaked[0]!r} is not released on this exit path",
+            )
+
     def _expression(
+        self, expression: Expr, env: dict[str, Type], expected: Type | None = None,
+    ) -> Type:
+        result = self._infer_expression(expression, env, expected)
+        self.expression_types[id(expression)] = result
+        return result
+
+    def _infer_expression(
         self, expression: Expr, env: dict[str, Type], expected: Type | None = None,
     ) -> Type:
         if isinstance(expression, Literal):
@@ -160,6 +231,19 @@ class TypeChecker:
         if isinstance(expression, Variable):
             if expression.name not in env:
                 self._error(expression.line, f"Unknown variable {expression.name!r}")
+            if (
+                expression.name in self._function_resource_globals
+                and _contains_resource(env[expression.name])
+            ):
+                self._error(
+                    expression.line,
+                    f"Resource global {expression.name!r} must be passed as a typed parameter",
+                )
+            if expression.name in self._released_resources:
+                self._error(
+                    expression.line,
+                    f"Resource {expression.name!r} was already released",
+                )
             return env[expression.name]
         if isinstance(expression, Unary):
             self._expect(
@@ -185,6 +269,11 @@ class TypeChecker:
         if isinstance(expression, Binary):
             left = self._expression(expression.left, env)
             right = self._expression(expression.right, env)
+            if self.strict and (_contains_any(left) or _contains_any(right)):
+                self._error(
+                    expression.line,
+                    "Strict mode cannot verify an operator with an any operand",
+                )
             if expression.op in {"and", "or"}:
                 self._expect(expression.line, Type("boolean"), left, expression.op)
                 self._expect(expression.line, Type("boolean"), right, expression.op)
@@ -233,6 +322,18 @@ class TypeChecker:
                     if name in function.param_types else None
                 )
                 actual = self._expression(argument, env, parameter_type)
+                if _contains_resource(actual) and (
+                    parameter_type is None or _type_variables(parameter_type)
+                ):
+                    self._error(
+                        call.line,
+                        "Resource handles cannot be passed through untyped or generic parameters",
+                    )
+                if self.strict and _contains_any(actual):
+                    self._error(
+                        call.line,
+                        f"Strict mode cannot verify argument {name!r} because its type is any",
+                    )
                 if parameter_type:
                     self._expect(call.line, parameter_type, actual, f"Argument {name!r}")
             result = parse_type(function.return_type) if function.return_type else Type("any")
@@ -253,6 +354,13 @@ class TypeChecker:
                     if name in function.param_types else None
                 )
                 actual = self._expression(argument, env, parameter_type)
+                if _contains_resource(actual) and (
+                    parameter_type is None or _type_variables(parameter_type)
+                ):
+                    self._error(
+                        call.line,
+                        "Resource handles cannot be passed through untyped or generic parameters",
+                    )
                 if parameter_type:
                     try:
                         _unify(parameter_type, actual, generic_params, substitutions)
@@ -269,9 +377,110 @@ class TypeChecker:
             self._validate_task_target(function, call.line) if function.is_async else None
             return Type("task", (result,)) if function.is_async else result
 
+        if call.name in GAME_FUNCTIONS:
+            expected_count = GAME_FUNCTIONS[call.name]
+            if len(call.args) != expected_count:
+                self._error(
+                    call.line,
+                    f"Game API {call.name} expects {expected_count} arguments, got {len(call.args)}",
+                )
+            arguments = [self._expression(argument, env) for argument in call.args]
+            for index, type_name in GAME_FUNCTION_ARGUMENT_TYPES.get(call.name, {}).items():
+                self._expect(
+                    call.line, Type(type_name), arguments[index],
+                    f"Game API {call.name} argument {index + 1}",
+                )
+            if call.name in {"unload_texture", "unload_sound"}:
+                resource = call.args[0]
+                if not isinstance(resource, Variable):
+                    self._error(call.line, f"{call.name} requires an owned resource variable")
+                if resource.name not in self._owned_resources:
+                    self._error(
+                        call.line,
+                        f"{call.name} can only release a resource owned in this scope",
+                    )
+                self._released_resources.add(resource.name)
+            return_type = Type(GAME_FUNCTION_RETURN_TYPES.get(call.name, "any"))
+            if (
+                return_type.name in _RESOURCE_TYPES
+                and call is not self._resource_initializer_call
+            ):
+                self._error(
+                    call.line,
+                    "A resource handle must be bound directly to an owning variable",
+                )
+            if call.name == "close_audio":
+                if self._function_resource_globals:
+                    self._error(
+                        call.line,
+                        "close_audio cannot be called from a function while resource globals exist",
+                    )
+                self._released_resources.update(
+                    name for name in self._owned_resources
+                    if name in env and env[name] == Type("sound")
+                )
+            if call.name == "close_window":
+                if self._function_resource_globals:
+                    self._error(
+                        call.line,
+                        "close_window cannot be called from a function while resource globals exist",
+                    )
+                self._released_resources.update(
+                    name for name in self._owned_resources
+                    if name in env and env[name] == Type("texture")
+                )
+            return return_type
+
         args = [self._expression(argument, env) for argument in call.args]
         name = call.name
+        modapi_records = Type(
+            "list", (Type("map", (Type("text"), Type("any"))),)
+        )
+        if name in {"modapi_items", "modapi_recipes"}:
+            if args:
+                self._error(call.line, f"{name} expects no arguments")
+            return modapi_records
+        if name in {"modapi_recipe_gui"}:
+            if args:
+                self._error(call.line, f"{name} expects no arguments")
+            return Type("number")
+        if name in {"modapi_recipes_for", "getrecipesforid"}:
+            if len(args) != 1:
+                self._error(call.line, f"{name} expects one item ID")
+            self._expect(call.line, Type("number"), args[0], "Item ID")
+            return modapi_records
+        if name in {"modapi_item_id", "getidforitem"}:
+            if len(args) != 1:
+                self._error(call.line, f"{name} expects one registry name")
+            self._expect(call.line, Type("text"), args[0], "Registry name")
+            return Type("number")
+        if name == "getitembyid":
+            if len(args) != 1:
+                self._error(call.line, "getItemById expects one item ID")
+            self._expect(call.line, Type("number"), args[0], "Item ID")
+            return Type("map", (Type("text"), Type("any")))
+        if name == "getrecipe":
+            if len(args) != 2:
+                self._error(call.line, "getRecipe expects an item ID and recipe index")
+            self._expect(call.line, Type("number"), args[0], "Item ID")
+            self._expect(call.line, Type("number"), args[1], "Recipe index")
+            return Type("map", (Type("text"), Type("any")))
+        if name == "modapi_register_item":
+            if len(args) != 2:
+                self._error(call.line, "modapi_register_item expects a name and stack size")
+            self._expect(call.line, Type("text"), args[0], "Item name")
+            self._expect(call.line, Type("number"), args[1], "Stack size")
+            return Type("number")
+        if name == "modapi_register_block":
+            if len(args) != 3:
+                self._error(call.line, "modapi_register_block expects a name, material, and hardness")
+            self._expect(call.line, Type("text"), args[0], "Block name")
+            self._expect(call.line, Type("text"), args[1], "Block material")
+            self._expect(call.line, Type("number"), args[2], "Block hardness")
+            return Type("number")
         if name in {"list", "set", "empty_list", "empty_set"}:
+            if any(_contains_resource(argument) for argument in args):
+                self._error(call.line, "Resource handles cannot be stored in collections")
             collection_name = name.removeprefix("empty_")
             element = args[0] if args else (expected.arguments[0] if expected and expected.arguments else Type("any"))
             if collection_name == "set" and not _valid_set_element(element):
@@ -280,8 +489,12 @@ class TypeChecker:
                 self._expect(call.line, element, actual, f"{collection_name} element")
             return Type(collection_name, (element,))
         if name == "tuple":
+            if any(_contains_resource(argument) for argument in args):
+                self._error(call.line, "Resource handles cannot be stored in collections")
             return Type("tuple", tuple(args))
         if name in {"map", "empty_map"}:
+            if any(_contains_resource(argument) for argument in args):
+                self._error(call.line, "Resource handles cannot be stored in collections")
             key_type = args[0] if args else (
                 expected.arguments[0] if expected and expected.name == "map" else Type("any")
             )
@@ -300,26 +513,39 @@ class TypeChecker:
             if len(args) != 1:
                 self._error(call.line, "channel expects a capacity")
             self._expect(call.line, Type("number"), args[0], "Channel capacity")
+            if expected and (
+                _contains_resource(expected)
+                or any(_contains_resource(argument) for argument in expected.arguments)
+            ):
+                self._error(call.line, "Resource handles cannot be stored in channels")
             return expected if expected and expected.name == "channel" else Type("channel", (Type("any"),))
         if name == "append":
             if len(args) != 2 or args[0].name != "list":
                 self._error(call.line, "append expects a list and a value")
+            if _contains_resource(args[0]) or _contains_resource(args[1]):
+                self._error(call.line, "Resource handles cannot be stored in collections")
             self._expect(call.line, args[0].arguments[0], args[1], "List element")
             return Type("void")
         if name == "add_to_set":
             if len(args) != 2 or args[0].name != "set":
                 self._error(call.line, "add_to_set expects a set and an element")
+            if _contains_resource(args[0]) or _contains_resource(args[1]):
+                self._error(call.line, "Resource handles cannot be stored in collections")
             self._expect(call.line, args[0].arguments[0], args[1], "Set element")
             return Type("void")
         if name == "put":
             if len(args) != 3 or args[0].name != "map":
                 self._error(call.line, "put expects a map, key, and value")
+            if any(_contains_resource(argument) for argument in args):
+                self._error(call.line, "Resource handles cannot be stored in collections")
             self._expect(call.line, args[0].arguments[0], args[1], "Map key")
             self._expect(call.line, args[0].arguments[1], args[2], "Map value")
             return Type("void")
         if name == "insert":
             if len(args) != 3 or args[0].name != "list":
                 self._error(call.line, "insert expects a list, index, and value")
+            if _contains_resource(args[0]) or _contains_resource(args[2]):
+                self._error(call.line, "Resource handles cannot be stored in collections")
             self._expect(call.line, Type("number"), args[1], "List index")
             self._expect(call.line, args[0].arguments[0], args[2], "List element")
             return Type("void")
@@ -327,6 +553,8 @@ class TypeChecker:
             if len(args) != 2:
                 self._error(call.line, f"{name} expects a collection and a key")
             collection = args[0]
+            if collection.name == "any" and name == "get":
+                return Type("any")
             if collection.name == "list":
                 self._expect(call.line, Type("number"), args[1], "List index")
                 return collection.arguments[0] if name == "get" else Type("void")
@@ -371,6 +599,12 @@ class TypeChecker:
             if name == "send":
                 if len(args) != 2:
                     self._error(call.line, "send expects a channel and a value")
+                if (
+                    _contains_resource(args[0])
+                    or _contains_resource(args[1])
+                    or any(_contains_resource(argument) for argument in args[0].arguments)
+                ):
+                    self._error(call.line, "Resource handles cannot be sent through channels")
                 self._expect(call.line, args[0].arguments[0], args[1], "Channel message")
                 return Type("task", (Type("void"),))
             return Type("task", (args[0].arguments[0],))
@@ -383,6 +617,11 @@ class TypeChecker:
                 self._error(call.line, "sleep expects a duration in seconds")
             self._expect(call.line, Type("number"), args[0], "sleep duration")
             return Type("task", (Type("void"),))
+        if name == "assert":
+            if len(args) != 1:
+                self._error(call.line, "assert expects one boolean condition")
+            self._expect(call.line, Type("boolean"), args[0], "assert condition")
+            return Type("void")
         return Type("any")
 
     def _validate_task_target(
@@ -477,23 +716,83 @@ class TypeChecker:
         for statement in statements:
             if isinstance(statement, If):
                 self._expression(statement.condition, env, Type("boolean"))
+                original_owners = set(self._owned_resources)
+                original_released = set(self._released_resources)
                 left, right = dict(env), dict(env)
                 self._statements(statement.body, left, return_type, is_async, function_line)
+                left_owners = set(self._owned_resources)
+                left_released = set(self._released_resources)
+                self._owned_resources = set(original_owners)
+                self._released_resources = set(original_released)
                 self._statements(statement.otherwise, right, return_type, is_async, function_line)
-                for name in left.keys() & right.keys():
-                    if name in env:
-                        env[name] = _merge(left[name], right[name])
-                    elif left[name] == right[name]:
-                        env[name] = left[name]
+                right_owners = set(self._owned_resources)
+                right_released = set(self._released_resources)
+                if isinstance(statement.condition, Literal) and isinstance(
+                    statement.condition.value, bool
+                ):
+                    selected_env, selected_owners, selected_released = (
+                        (left, left_owners, left_released)
+                        if statement.condition.value else
+                        (right, right_owners, right_released)
+                    )
+                    env.clear()
+                    env.update(selected_env)
+                    self._owned_resources = selected_owners
+                    self._released_resources = selected_released
+                else:
+                    resources = (
+                        original_owners | original_released
+                        | left_owners | left_released
+                        | right_owners | right_released
+                    )
+                    for name in resources:
+                        if (
+                            (name in left_owners, name in left_released)
+                            != (name in right_owners, name in right_released)
+                        ):
+                            self._error(
+                                statement.line,
+                                f"Resource {name!r} must have the same ownership state "
+                                "in both branches",
+                            )
+                    for name in left.keys() & right.keys():
+                        if name in env:
+                            env[name] = _merge(left[name], right[name])
+                        elif left[name] == right[name]:
+                            env[name] = left[name]
+                    self._owned_resources = left_owners
+                    self._released_resources = left_released
             elif isinstance(statement, While):
                 self._expression(statement.condition, env, Type("boolean"))
+                owners, released = set(self._owned_resources), set(self._released_resources)
                 self._statements(statement.body, dict(env), return_type, is_async, function_line)
+                cannot_execute = (
+                    isinstance(statement.condition, Literal)
+                    and statement.condition.value is False
+                )
+                if not cannot_execute and (
+                    self._owned_resources != owners
+                    or self._released_resources != released
+                ):
+                    self._error(statement.line, "Resource ownership cannot change inside a loop")
+                self._owned_resources, self._released_resources = owners, released
             elif isinstance(statement, Repeat):
                 self._expect(
                     statement.line, Type("number"),
                     self._expression(statement.count, env, Type("number")), "Repeat count",
                 )
+                owners, released = set(self._owned_resources), set(self._released_resources)
                 self._statements(statement.body, dict(env), return_type, is_async, function_line)
+                cannot_execute = (
+                    isinstance(statement.count, Literal)
+                    and statement.count.value == 0
+                )
+                if not cannot_execute and (
+                    self._owned_resources != owners
+                    or self._released_resources != released
+                ):
+                    self._error(statement.line, "Resource ownership cannot change inside a loop")
+                self._owned_resources, self._released_resources = owners, released
             elif isinstance(statement, RangeLoop):
                 self._expect(
                     statement.line, Type("number"),
@@ -505,7 +804,21 @@ class TypeChecker:
                 )
                 loop_env = dict(env)
                 loop_env[statement.name] = Type("number")
+                owners, released = set(self._owned_resources), set(self._released_resources)
                 self._statements(statement.body, loop_env, return_type, is_async, function_line)
+                cannot_execute = (
+                    isinstance(statement.start, Literal)
+                    and isinstance(statement.end, Literal)
+                    and type(statement.start.value) is int
+                    and type(statement.end.value) is int
+                    and statement.start.value > statement.end.value
+                )
+                if not cannot_execute and (
+                    self._owned_resources != owners
+                    or self._released_resources != released
+                ):
+                    self._error(statement.line, "Resource ownership cannot change inside a loop")
+                self._owned_resources, self._released_resources = owners, released
             else:
                 self._statement(statement, env, return_type, is_async)
 
@@ -516,16 +829,55 @@ class TypeChecker:
             if statement.name in env:
                 self._error(statement.line, f"Variable {statement.name!r} already exists")
             declared = parse_type(statement.type_annotation) if statement.type_annotation else None
-            inferred = self._expression(statement.value, env, declared)
+            self._resource_initializer_call = (
+                statement.value if isinstance(statement.value, Call)
+                and statement.value.name in {"load_texture", "load_sound"} else None
+            )
+            try:
+                inferred = self._expression(statement.value, env, declared)
+            finally:
+                self._resource_initializer_call = None
+            if self.strict and _contains_any(inferred):
+                self._error(
+                    statement.line,
+                    f"Strict mode cannot infer a concrete type for {statement.name!r}",
+                )
             if declared:
+                if self.strict and _contains_any(declared):
+                    self._error(statement.line, "Strict mode forbids any in a type annotation")
                 self._expect(statement.line, declared, inferred, "Declaration")
+                if _contains_resource(declared) and declared.name not in _RESOURCE_TYPES:
+                    self._error(statement.line, "Resource handles cannot be stored in collections")
+                if _contains_resource(inferred) and declared != inferred:
+                    self._error(
+                        statement.line,
+                        "A resource declaration must preserve its concrete resource type",
+                    )
                 env[statement.name] = declared
             else:
                 env[statement.name] = inferred
+            if _contains_resource(inferred):
+                if inferred.name not in _RESOURCE_TYPES:
+                    self._error(statement.line, "Resource handles cannot be stored in collections")
+                creator = {"texture": "load_texture", "sound": "load_sound"}[inferred.name]
+                if not isinstance(statement.value, Call) or statement.value.name != creator:
+                    self._error(
+                        statement.line,
+                        f"Resource handles cannot be copied by declaration; "
+                        f"{inferred.name} ownership must come directly from {creator}",
+                    )
+                self._owned_resources.add(statement.name)
         elif isinstance(statement, Assign):
             if statement.name not in env:
                 self._error(statement.line, f"Unknown variable {statement.name!r}")
+            if _contains_resource(env[statement.name]):
+                self._error(
+                    statement.line,
+                    f"Owned resource {statement.name!r} cannot be reassigned",
+                )
             actual = self._expression(statement.value, env, env[statement.name])
+            if _contains_resource(actual):
+                self._error(statement.line, "Resource handles cannot be copied by assignment")
             self._expect(statement.line, env[statement.name], actual, "Assignment")
         elif isinstance(statement, Display):
             self._expression(statement.value, env)
@@ -538,6 +890,9 @@ class TypeChecker:
                 )
         elif isinstance(statement, Return):
             actual = self._expression(statement.value, env, return_type)
+            if _contains_resource(actual):
+                self._error(statement.line, "Resource handles cannot be returned")
+            self._check_owned_resources_released(statement.line)
             if return_type:
                 self._expect(statement.line, return_type, actual, "Return")
 

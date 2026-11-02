@@ -1,0 +1,48 @@
+create crate as create_entity
+call add_transform_3d with crate and -0.5 and 3 and -0.5
+call add_rigidbody with crate and 2
+call add_box_collider_3d with crate and 1 and 1 and 1 and 0.15 and 0.35
+
+create floor as create_entity
+call add_transform_3d with floor and -0.5 and -0.5 and -0.5
+call add_rigidbody with floor and 0
+call add_box_collider_3d with floor and 1 and 1 and 1 and 0 and 0.8
+
+call physics_set_gravity_3d with 0 and -9.8 and 0
+call init_window with 900 and 600 and text Zelix 3D ECS Physics end text
+call set_target_fps with 60
+
+while not window_should_close
+    if key_down with text left end text
+        call entity_set_velocity_3d with crate and -3 and entity_velocity_y with crate and entity_velocity_z with crate
+    end if
+    if key_down with text right end text
+        call entity_set_velocity_3d with crate and 3 and entity_velocity_y with crate and entity_velocity_z with crate
+    end if
+    if key_down with text w end text
+        call entity_set_velocity_3d with crate and entity_velocity_x with crate and entity_velocity_y with crate and -3
+    end if
+    if key_down with text s end text
+        call entity_set_velocity_3d with crate and entity_velocity_x with crate and entity_velocity_y with crate and 3
+    end if
+
+    call physics_update with frame_time
+    create crate_x_base as entity_x with crate
+    create crate_y_base as entity_y with crate
+    create crate_z_base as entity_z with crate
+    create crate_x as crate_x_base plus 0.5
+    create crate_y as crate_y_base plus 0.5
+    create crate_z as crate_z_base plus 0.5
+    call begin_drawing
+    call clear_background with text raywhite end text
+    call begin_3d
+    call draw_cube with crate_x and crate_y and crate_z and 1 and text orange end text
+    call draw_cube with 0 and 0 and 0 and 1 and text gray end text
+    call end_3d
+    call draw_text with text Arrows move in X/Z; gravity and 3D box contacts in Y end text and 18 and 18 and 20 and text darkgray end text
+    call end_drawing
+end loop
+
+call close_window
+call destroy_entity with crate
+call destroy_entity with floor
