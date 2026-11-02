@@ -454,7 +454,7 @@ class ZelixTests(unittest.TestCase):
             self.assertEqual(build.call_args.args[0], entry)
             suffix = ".exe" if sys.platform == "win32" else ""
             self.assertEqual(
-                build.call_args.args[1], root / "target" / f"app{suffix}",
+                build.call_args.args[1], root.resolve() / "target" / f"app{suffix}",
             )
             self.assertTrue(manifest.is_file())
 
